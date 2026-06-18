@@ -232,6 +232,78 @@ class AppFlowTest(unittest.TestCase):
         finally:
             file_response.close()
 
+    def test_contract_form_can_create_client_and_photos_in_one_step(self):
+        response = self.client.post(
+            "/contracts/new",
+            data={
+                "branch_id": self._branch_id("PIN"),
+                "client_mode": "new",
+                "new_client_first_name": "Maria",
+                "new_client_last_name": "Wisniewska",
+                "new_client_pesel": "92020212345",
+                "new_client_document_type": "Dowód Osobisty",
+                "new_client_document_number": "CDE123456",
+                "new_client_phone": "501502503",
+                "new_client_email": "maria@example.com",
+                "new_client_street_address": "ul. Rynek 2",
+                "new_client_postal_code": "28-400",
+                "new_client_city": "Pińczów",
+                "new_client_notes": "Stała klientka punktu Pińczów.",
+                "issue_date": "2026-04-01",
+                "loan_amount": "1500,00",
+                "commission_amount": "",
+                "commission_rate": "10",
+                "term_days": "14",
+                "collateral_type": "biżuteria",
+                "collateral_description": "Pierścionek złoty próba 585",
+                "collateral_value": "2200,00",
+                "valuation_basis": "oględziny i waga przedmiotu",
+                "photo_caption": "Zdjęcie przy przyjęciu",
+                "photos": [(io.BytesIO(b"inline image bytes"), "pierscionek.jpg")],
+            },
+            content_type="multipart/form-data",
+            follow_redirects=True,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        page = response.get_data(as_text=True)
+        self.assertIn("Maria Wisniewska", page)
+        self.assertIn("Pińczów", page)
+
+        with self.app.app_context():
+            db = get_db()
+            client = db.execute(
+                "SELECT * FROM clients WHERE pesel = ?",
+                ("92020212345",),
+            ).fetchone()
+            self.assertIsNotNone(client)
+            contract = db.execute(
+                """
+                SELECT contracts.*, branches.code AS branch_code
+                FROM contracts
+                JOIN branches ON branches.id = contracts.branch_id
+                WHERE contracts.client_id = ?
+                """,
+                (client["id"],),
+            ).fetchone()
+            self.assertEqual(contract["contract_number"], "PIN/2026/0001")
+            self.assertEqual(contract["total_repayment_cents"], 165_000)
+            photo = db.execute(
+                "SELECT * FROM contract_photos WHERE contract_id = ?",
+                (contract["id"],),
+            ).fetchone()
+            self.assertIsNotNone(photo)
+            self.assertEqual(photo["caption"], "Zdjęcie przy przyjęciu")
+
+        file_response = self.client.get(
+            f"/uploads/{contract['id']}/{photo['stored_filename']}"
+        )
+        try:
+            self.assertEqual(file_response.status_code, 200)
+            self.assertEqual(file_response.get_data(), b"inline image bytes")
+        finally:
+            file_response.close()
+
     def test_overdue_status_and_accounting_transitions_are_guarded(self):
         contract = self._create_contract(issue_date="2025-01-01", term_days="1")
 

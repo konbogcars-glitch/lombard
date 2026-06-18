@@ -260,6 +260,40 @@ button:hover {
   padding: 14px;
 }
 
+.client-choice {
+  display: grid;
+  gap: 12px;
+}
+
+.radio-line {
+  align-items: center;
+  color: var(--text);
+  display: flex;
+  flex-direction: row;
+  font-size: 14px;
+  gap: 8px;
+}
+
+.radio-line input {
+  width: auto;
+}
+
+.form-subsection {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  display: grid;
+  gap: 12px;
+  margin: 0;
+  padding: 14px;
+}
+
+.form-subsection legend {
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 700;
+  padding: 0 6px;
+}
+
 .bulk-accounting {
   align-items: end;
   background: #f8fbff;

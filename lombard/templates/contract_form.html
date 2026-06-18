@@ -9,12 +9,7 @@
   <a class="button" href="{{ url_for('lombard.clients') }}">Dodaj klienta</a>
 </section>
 
-{% if not clients %}
-  <section class="panel">
-    <p class="empty">Najpierw dodaj klienta w kartotece, aby wystawić umowę.</p>
-  </section>
-{% else %}
-<form method="post" class="panel form wide" id="contract-form">
+<form method="post" enctype="multipart/form-data" class="panel form wide" id="contract-form">
   <h2>Dane umowy</h2>
   <div class="row">
     <label>Punkt
@@ -26,18 +21,58 @@
         {% endfor %}
       </select>
     </label>
-    <label>Klient
-      <select name="client_id" required>
-        {% for client in clients %}
-          <option value="{{ client.id }}" {% if selected_client_id == client.id %}selected{% endif %}>
-            {{ client.last_name }} {{ client.first_name }}{% if client.pesel %} — {{ client.pesel }}{% endif %}
-          </option>
-        {% endfor %}
-      </select>
-    </label>
     <label>Data umowy <input type="date" name="issue_date" value="{{ today.isoformat() }}" required></label>
   </div>
 
+  <h2>Klient</h2>
+  <div class="client-choice">
+    <label class="radio-line">
+      <input type="radio" name="client_mode" value="existing" {% if clients %}checked{% else %}disabled{% endif %}>
+      Wybierz klienta z kartoteki
+    </label>
+    {% if clients %}
+      <label>Klient
+        <select name="client_id" id="client_id" required>
+          {% for client in clients %}
+            <option value="{{ client.id }}" {% if selected_client_id == client.id %}selected{% endif %}>
+              {{ client.last_name }} {{ client.first_name }}{% if client.pesel %} — {{ client.pesel }}{% endif %}
+            </option>
+          {% endfor %}
+        </select>
+      </label>
+    {% else %}
+      <p class="empty">Kartoteka jest pusta. Wpisz dane nowego klienta poniżej, a zostanie zapisany automatycznie.</p>
+    {% endif %}
+
+    <label class="radio-line">
+      <input type="radio" name="client_mode" value="new" {% if not clients %}checked{% endif %}>
+      Dodaj nowego klienta przy wystawianiu umowy
+    </label>
+    <fieldset class="form-subsection" id="new-client-fields">
+      <legend>Dane nowego klienta</legend>
+      <div class="row">
+        <label>Imię <input name="new_client_first_name" data-required="true"></label>
+        <label>Nazwisko <input name="new_client_last_name" data-required="true"></label>
+        <label>PESEL <input name="new_client_pesel"></label>
+      </div>
+      <div class="row">
+        <label>Typ dokumentu <input name="new_client_document_type" value="Dowód Osobisty" data-required="true"></label>
+        <label>Numer dokumentu <input name="new_client_document_number"></label>
+        <label>Telefon <input name="new_client_phone"></label>
+      </div>
+      <div class="row">
+        <label>Email <input type="email" name="new_client_email"></label>
+        <label>Adres zamieszkania <input name="new_client_street_address" data-required="true"></label>
+      </div>
+      <div class="row">
+        <label>Kod pocztowy <input name="new_client_postal_code"></label>
+        <label>Miejscowość <input name="new_client_city" data-required="true"></label>
+      </div>
+      <label>Notatki <textarea name="new_client_notes" rows="2"></textarea></label>
+    </fieldset>
+  </div>
+
+  <h2>Kwoty i terminy</h2>
   <div class="row">
     <label>Kwota pożyczki <input class="money-input" name="loan_amount" id="loan_amount" value="1000,00" required></label>
     <label>Prowizja ręcznie <input class="money-input" name="commission_amount" id="commission_amount" placeholder="np. 100,00"></label>
@@ -63,8 +98,43 @@
   <label>Podstawa wyceny
     <textarea name="valuation_basis" rows="2" placeholder="np. oferty podobnych rzeczy w sieci Internet, oględziny przedmiotu"></textarea>
   </label>
+
+  <h2>Zdjęcia do umowy</h2>
+  <p class="muted">Możesz dołączyć zdjęcia zabezpieczenia od razu. Będą zapisane przy umowie i dodane do PDF jako załącznik.</p>
+  <div class="row">
+    <label>Zdjęcia
+      <input type="file" name="photos" accept=".jpg,.jpeg,.png,.webp,image/*" multiple>
+    </label>
+    <label>Opis zdjęć
+      <input name="photo_caption" placeholder="np. stan przedmiotu przy przyjęciu">
+    </label>
+  </div>
+
   <button class="button primary">Utwórz umowę</button>
 </form>
+
+<script>
+  function updateClientMode() {
+    const selectedMode = document.querySelector('input[name="client_mode"]:checked')?.value || "existing";
+    const existingSelect = document.getElementById("client_id");
+    const newFields = document.getElementById("new-client-fields");
+    const newClientActive = selectedMode === "new";
+
+    if (existingSelect) {
+      existingSelect.disabled = newClientActive;
+      existingSelect.required = !newClientActive;
+    }
+    newFields.querySelectorAll("input, textarea").forEach((field) => {
+      field.disabled = !newClientActive;
+      field.required = newClientActive && field.dataset.required === "true";
+    });
+  }
+
+  document.querySelectorAll('input[name="client_mode"]').forEach((field) => {
+    field.addEventListener("change", updateClientMode);
+  });
+  updateClientMode();
+</script>
 
 <script>
   function parseMoney(value) {
@@ -88,5 +158,4 @@
   });
   refreshPreview();
 </script>
-{% endif %}
 {% endblock %}

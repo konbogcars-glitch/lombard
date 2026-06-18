@@ -123,6 +123,69 @@ def _photo_rows(contract_id: int) -> list[dict]:
     )
 
 
+def _form_value(name: str, *, prefix: str = "") -> str:
+    return request.form.get(f"{prefix}{name}", "").strip()
+
+
+def _insert_client_from_form(*, db, prefix: str = "") -> int:
+    cursor = db.execute(
+        """
+        INSERT INTO clients(
+            first_name, last_name, pesel, document_type, document_number,
+            phone, email, street_address, postal_code, city, notes
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            _form_value("first_name", prefix=prefix),
+            _form_value("last_name", prefix=prefix),
+            _form_value("pesel", prefix=prefix),
+            _form_value("document_type", prefix=prefix) or "Dowód Osobisty",
+            _form_value("document_number", prefix=prefix),
+            _form_value("phone", prefix=prefix),
+            _form_value("email", prefix=prefix),
+            _form_value("street_address", prefix=prefix),
+            _form_value("postal_code", prefix=prefix),
+            _form_value("city", prefix=prefix),
+            _form_value("notes", prefix=prefix),
+        ),
+    )
+    return int(cursor.lastrowid)
+
+
+def _save_contract_photos(
+    *,
+    db,
+    contract_id: int,
+    uploaded,
+    caption: str,
+) -> int:
+    upload_dir = Path(current_app.config["UPLOAD_FOLDER"]) / str(contract_id)
+    saved = 0
+
+    for file in uploaded:
+        if not file or not file.filename:
+            continue
+        extension = file.filename.rsplit(".", 1)[-1].lower() if "." in file.filename else ""
+        if extension not in ALLOWED_EXTENSIONS:
+            flash(f"Pominięto plik {file.filename}: dozwolone są JPG, PNG i WEBP.", "warning")
+            continue
+        upload_dir.mkdir(parents=True, exist_ok=True)
+        safe_name = secure_filename(file.filename)
+        stored_name = f"{uuid.uuid4().hex}_{safe_name}"
+        file.save(upload_dir / stored_name)
+        db.execute(
+            """
+            INSERT INTO contract_photos(contract_id, stored_filename, original_filename, caption)
+            VALUES (?, ?, ?, ?)
+            """,
+            (contract_id, stored_name, file.filename, caption),
+        )
+        saved += 1
+
+    return saved
+
+
 def _refresh_overdue_contracts(today: date | None = None) -> None:
     current_date = today or _today()
     db = get_db()
@@ -212,28 +275,7 @@ def dashboard() -> str:
 def clients() -> str | Response:
     db = get_db()
     if request.method == "POST":
-        db.execute(
-            """
-            INSERT INTO clients(
-                first_name, last_name, pesel, document_type, document_number,
-                phone, email, street_address, postal_code, city, notes
-            )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                request.form["first_name"].strip(),
-                request.form["last_name"].strip(),
-                request.form.get("pesel", "").strip(),
-                request.form.get("document_type", "Dowód Osobisty").strip(),
-                request.form.get("document_number", "").strip(),
-                request.form.get("phone", "").strip(),
-                request.form.get("email", "").strip(),
-                request.form["street_address"].strip(),
-                request.form.get("postal_code", "").strip(),
-                request.form["city"].strip(),
-                request.form.get("notes", "").strip(),
-            ),
-        )
+        _insert_client_from_form(db=db)
         db.commit()
         flash("Dodano klienta do kartoteki.", "success")
         return redirect(url_for("lombard.clients"))
@@ -334,7 +376,14 @@ def contract_new() -> str | Response:
     if request.method == "POST":
         issue_date = _parse_date(request.form["issue_date"])
         branch_id = int(request.form["branch_id"])
-        client_id = int(request.form["client_id"])
+        client_mode = request.form.get("client_mode") or (
+            "existing" if request.form.get("client_id") else "new"
+        )
+        client_id = (
+            _insert_client_from_form(db=db, prefix="new_client_")
+            if client_mode == "new"
+            else int(request.form["client_id"])
+        )
         loan_amount_cents = money_to_cents(request.form["loan_amount"])
         commission_raw = request.form.get("commission_amount", "").strip()
         commission_amount_cents = money_to_cents(commission_raw) if commission_raw else None
@@ -379,9 +428,21 @@ def contract_new() -> str | Response:
                 calculation.sale_mode,
             ),
         )
+        contract_id = int(cursor.lastrowid)
+        saved_photos = _save_contract_photos(
+            db=db,
+            contract_id=contract_id,
+            uploaded=request.files.getlist("photos"),
+            caption=request.form.get("photo_caption", "").strip(),
+        )
         db.commit()
-        flash("Utworzono umowę. Możesz teraz dodać zdjęcia zabezpieczenia.", "success")
-        return redirect(url_for("lombard.contract_detail", contract_id=cursor.lastrowid))
+        if client_mode == "new":
+            flash("Dodano klienta do kartoteki.", "success")
+        if saved_photos:
+            flash(f"Utworzono umowę i dodano zdjęcia: {saved_photos}.", "success")
+        else:
+            flash("Utworzono umowę. Możesz teraz dodać zdjęcia zabezpieczenia.", "success")
+        return redirect(url_for("lombard.contract_detail", contract_id=contract_id))
 
     return render_template(
         "contract_form.html",
@@ -415,31 +476,13 @@ def contract_detail(contract_id: int) -> str:
 @bp.route("/contracts/<int:contract_id>/photos", methods=["POST"])
 def contract_photos(contract_id: int) -> Response:
     _contract_or_404(contract_id)
-    uploaded = request.files.getlist("photos")
-    caption = request.form.get("caption", "").strip()
-    upload_dir = Path(current_app.config["UPLOAD_FOLDER"]) / str(contract_id)
-    upload_dir.mkdir(parents=True, exist_ok=True)
     db = get_db()
-    saved = 0
-
-    for file in uploaded:
-        if not file or not file.filename:
-            continue
-        extension = file.filename.rsplit(".", 1)[-1].lower() if "." in file.filename else ""
-        if extension not in ALLOWED_EXTENSIONS:
-            flash(f"Pominięto plik {file.filename}: dozwolone są JPG, PNG i WEBP.", "warning")
-            continue
-        safe_name = secure_filename(file.filename)
-        stored_name = f"{uuid.uuid4().hex}_{safe_name}"
-        file.save(upload_dir / stored_name)
-        db.execute(
-            """
-            INSERT INTO contract_photos(contract_id, stored_filename, original_filename, caption)
-            VALUES (?, ?, ?, ?)
-            """,
-            (contract_id, stored_name, file.filename, caption),
-        )
-        saved += 1
+    saved = _save_contract_photos(
+        db=db,
+        contract_id=contract_id,
+        uploaded=request.files.getlist("photos"),
+        caption=request.form.get("caption", "").strip(),
+    )
 
     db.commit()
     if saved:
