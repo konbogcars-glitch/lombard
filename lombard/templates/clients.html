@@ -30,7 +30,10 @@
               <td>{{ client.document_number or "-" }}</td>
               <td>{{ client.phone or "-" }}</td>
               <td>{{ client.contracts_count }}</td>
-              <td><a href="{{ url_for('lombard.client_detail', client_id=client.id) }}">Otwórz</a></td>
+              <td>
+                <a href="{{ url_for('lombard.client_detail', client_id=client.id) }}">Otwórz</a>
+                <a href="{{ url_for('lombard.client_edit', client_id=client.id) }}">Edytuj</a>
+              </td>
             </tr>
           {% endfor %}
         </tbody>

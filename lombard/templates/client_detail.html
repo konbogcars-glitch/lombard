@@ -6,7 +6,10 @@
     <h1>{{ client.first_name }} {{ client.last_name }}</h1>
     <p>{{ client.street_address }}, {{ client.postal_code }} {{ client.city }}</p>
   </div>
-  <a class="button primary" href="{{ url_for('lombard.contract_new', client_id=client.id) }}">Nowa umowa dla klienta</a>
+  <div class="actions">
+    <a class="button primary" href="{{ url_for('lombard.contract_new', client_id=client.id) }}">Nowa umowa dla klienta</a>
+    <a class="button" href="{{ url_for('lombard.client_edit', client_id=client.id) }}">Edytuj dane</a>
+  </div>
 </section>
 
 <section class="cards">

@@ -92,6 +92,49 @@ class AppFlowTest(unittest.TestCase):
                 "SELECT * FROM contracts ORDER BY id DESC LIMIT 1",
             ).fetchone()
 
+    def test_client_card_can_be_updated_for_existing_contracts(self):
+        client_id = self._create_client()
+        contract = self._create_contract(client_id=client_id)
+
+        edit_page = self.client.get(f"/clients/{client_id}/edit")
+        self.assertEqual(edit_page.status_code, 200)
+        self.assertIn("Jan", edit_page.get_data(as_text=True))
+
+        response = self.client.post(
+            f"/clients/{client_id}/edit",
+            data={
+                "first_name": "Jan",
+                "last_name": "Nowak",
+                "pesel": "90010112345",
+                "document_type": "Dowód Osobisty",
+                "document_number": "XYZ987654",
+                "phone": "700800900",
+                "email": "jan.nowak@example.com",
+                "street_address": "ul. Poprawiona 2",
+                "postal_code": "28-400",
+                "city": "Pińczów",
+                "notes": "Dane potwierdzone przy kolejnej wizycie.",
+            },
+            follow_redirects=True,
+        )
+        self.assertEqual(response.status_code, 200)
+        detail_page = response.get_data(as_text=True)
+        self.assertIn("Jan Nowak", detail_page)
+        self.assertIn("700800900", detail_page)
+
+        contract_page = self.client.get(f"/contracts/{contract['id']}").get_data(as_text=True)
+        self.assertIn("Jan Nowak", contract_page)
+        self.assertIn("ul. Poprawiona 2", contract_page)
+
+        with self.app.app_context():
+            updated = get_db().execute(
+                "SELECT last_name, phone, city FROM clients WHERE id = ?",
+                (client_id,),
+            ).fetchone()
+            self.assertEqual(updated["last_name"], "Nowak")
+            self.assertEqual(updated["phone"], "700800900")
+            self.assertEqual(updated["city"], "Pińczów")
+
     def test_client_contract_pdf_settlement_and_accounting_export(self):
         response = self.client.post(
             "/clients",

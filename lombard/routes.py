@@ -108,6 +108,13 @@ def _contract_or_404(contract_id: int) -> dict:
     return contract
 
 
+def _client_or_404(client_id: int) -> dict:
+    client = query_one("SELECT * FROM clients WHERE id = ?", (client_id,))
+    if client is None:
+        abort(404)
+    return client
+
+
 def _photo_rows(contract_id: int) -> list[dict]:
     return query_all(
         "SELECT * FROM contract_photos WHERE contract_id = ? ORDER BY uploaded_at DESC",
@@ -258,9 +265,7 @@ def clients() -> str | Response:
 
 @bp.route("/clients/<int:client_id>")
 def client_detail(client_id: int) -> str:
-    client = query_one("SELECT * FROM clients WHERE id = ?", (client_id,))
-    if client is None:
-        abort(404)
+    client = _client_or_404(client_id)
     contracts = query_all(
         """
         SELECT contracts.*, branches.city AS branch_city
@@ -272,6 +277,49 @@ def client_detail(client_id: int) -> str:
         (client_id,),
     )
     return render_template("client_detail.html", client=client, contracts=contracts)
+
+
+@bp.route("/clients/<int:client_id>/edit", methods=["GET", "POST"])
+def client_edit(client_id: int) -> str | Response:
+    client = _client_or_404(client_id)
+    if request.method == "POST":
+        get_db().execute(
+            """
+            UPDATE clients
+            SET first_name = ?,
+                last_name = ?,
+                pesel = ?,
+                document_type = ?,
+                document_number = ?,
+                phone = ?,
+                email = ?,
+                street_address = ?,
+                postal_code = ?,
+                city = ?,
+                notes = ?,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+            """,
+            (
+                request.form["first_name"].strip(),
+                request.form["last_name"].strip(),
+                request.form.get("pesel", "").strip(),
+                request.form.get("document_type", "Dowód Osobisty").strip(),
+                request.form.get("document_number", "").strip(),
+                request.form.get("phone", "").strip(),
+                request.form.get("email", "").strip(),
+                request.form["street_address"].strip(),
+                request.form.get("postal_code", "").strip(),
+                request.form["city"].strip(),
+                request.form.get("notes", "").strip(),
+                client_id,
+            ),
+        )
+        get_db().commit()
+        flash("Zaktualizowano dane klienta w kartotece.", "success")
+        return redirect(url_for("lombard.client_detail", client_id=client_id))
+
+    return render_template("client_form.html", client=client)
 
 
 @bp.route("/contracts/new", methods=["GET", "POST"])
