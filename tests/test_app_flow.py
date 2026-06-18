@@ -1124,6 +1124,36 @@ class AppFlowTest(unittest.TestCase):
             ).fetchone()
             self.assertIn("Własny wzór", template["value"])
 
+    def test_contract_template_can_be_loaded_from_text_file(self):
+        response = self.client.post(
+            "/contract-template",
+            data={
+                "contract_template": "Ta treść powinna zostać zastąpiona plikiem.",
+                "contract_template_file": (
+                    io.BytesIO(
+                        "Wzór z pliku dla {client_name}\nDo spłaty: {total_repayment}".encode(
+                            "utf-8"
+                        )
+                    ),
+                    "gotowa_umowa.txt",
+                ),
+            },
+            content_type="multipart/form-data",
+            follow_redirects=True,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        page = response.get_data(as_text=True)
+        self.assertIn("Wzór z pliku dla {client_name}", page)
+        self.assertNotIn("Ta treść powinna zostać zastąpiona", page)
+
+        with self.app.app_context():
+            template = get_db().execute(
+                "SELECT value FROM settings WHERE key = 'contract_template_text'",
+            ).fetchone()
+            self.assertIn("Wzór z pliku dla {client_name}", template["value"])
+            self.assertNotIn("zastąpiona plikiem", template["value"])
+
     def test_sold_contract_enters_accounting_register(self):
         contract = self._create_contract(issue_date="2026-01-01", term_days="1")
 

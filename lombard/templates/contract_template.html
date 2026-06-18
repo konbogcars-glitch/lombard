@@ -14,10 +14,14 @@
     {% endif %}
   </div>
 
-  <form method="post" class="form template-editor">
+  <form method="post" enctype="multipart/form-data" class="form template-editor">
     <label>Treść umowy do PDF
       <textarea name="contract_template" rows="28" spellcheck="false">{{ template_text }}</textarea>
     </label>
+    <label>Wczytaj gotowy wzór z pliku TXT/MD
+      <input type="file" name="contract_template_file" accept=".txt,.md,text/plain,text/markdown">
+    </label>
+    <p class="muted">Jeżeli wybierzesz plik, jego treść zastąpi tekst z pola powyżej przy zapisie szablonu.</p>
     <div class="actions">
       <button class="button primary">Zapisz szablon</button>
       <button class="button" name="reset_template" value="1" formnovalidate>Przywróć domyślny</button>

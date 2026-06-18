@@ -45,6 +45,7 @@ from .pdf import (
 
 bp = Blueprint("lombard", __name__)
 ALLOWED_EXTENSIONS = {"jpg", "jpeg", "png", "webp"}
+ALLOWED_TEMPLATE_EXTENSIONS = {"txt", "md"}
 ACCOUNTANT_EMAIL_KEY = "accountant_email"
 ACCOUNTANT_NAME_KEY = "accountant_name"
 CONTRACT_TEMPLATE_KEY = "contract_template_text"
@@ -126,6 +127,30 @@ def _accountant_settings() -> dict:
 
 def _contract_template_text() -> str:
     return _get_setting(CONTRACT_TEMPLATE_KEY) or DEFAULT_CONTRACT_TEMPLATE
+
+
+def _uploaded_contract_template_text(uploaded_file) -> str | None:
+    if not uploaded_file or not uploaded_file.filename:
+        return None
+
+    extension = uploaded_file.filename.rsplit(".", 1)[-1].lower() if "." in uploaded_file.filename else ""
+    if extension not in ALLOWED_TEMPLATE_EXTENSIONS:
+        flash("Pominięto plik szablonu: dozwolone są pliki TXT albo MD.", "warning")
+        return None
+
+    payload = uploaded_file.read()
+    if not payload.strip():
+        flash("Pominięto pusty plik szablonu umowy.", "warning")
+        return None
+
+    for encoding in ("utf-8-sig", "cp1250"):
+        try:
+            return payload.decode(encoding)
+        except UnicodeDecodeError:
+            continue
+
+    flash("Nie udało się odczytać pliku szablonu. Zapisano treść z pola tekstowego.", "warning")
+    return None
 
 
 def _money_input(cents: int | None) -> str:
@@ -1180,7 +1205,14 @@ def contract_template_settings() -> str | Response:
     if request.method == "POST":
         template_text = ""
         if request.form.get("reset_template") != "1":
-            template_text = request.form.get("contract_template", "").strip()
+            uploaded_template_text = _uploaded_contract_template_text(
+                request.files.get("contract_template_file")
+            )
+            template_text = (
+                uploaded_template_text
+                if uploaded_template_text is not None
+                else request.form.get("contract_template", "")
+            ).strip()
         _save_setting(db=db, key=CONTRACT_TEMPLATE_KEY, value=template_text)
         db.commit()
         message = (
