@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+{% block title %}Klient {{ client.first_name }} {{ client.last_name }}{% endblock %}
+{% block content %}
+<section class="hero">
+  <div>
+    <h1>{{ client.first_name }} {{ client.last_name }}</h1>
+    <p>{{ client.street_address }}, {{ client.postal_code }} {{ client.city }}</p>
+  </div>
+  <a class="button primary" href="{{ url_for('lombard.contract_new', client_id=client.id) }}">Nowa umowa dla klienta</a>
+</section>
+
+<section class="cards">
+  <article class="card"><span class="label">PESEL</span><strong>{{ client.pesel or "-" }}</strong></article>
+  <article class="card"><span class="label">Dokument</span><strong>{{ client.document_number or "-" }}</strong></article>
+  <article class="card"><span class="label">Telefon</span><strong>{{ client.phone or "-" }}</strong></article>
+  <article class="card"><span class="label">Email</span><strong>{{ client.email or "-" }}</strong></article>
+</section>
+
+<section class="panel">
+  <div class="panel-heading">
+    <h2>Historia umów</h2>
+    <a href="{{ url_for('lombard.clients') }}">Wróć do kartoteki</a>
+  </div>
+  {% if contracts %}
+    <table>
+      <thead>
+        <tr>
+          <th>Nr</th>
+          <th>Punkt</th>
+          <th>Data</th>
+          <th>Termin</th>
+          <th>Kwota</th>
+          <th>Status</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for contract in contracts %}
+          <tr>
+            <td>{{ contract.contract_number }}</td>
+            <td>{{ contract.branch_city }}</td>
+            <td>{{ contract.issue_date|date_pl }}</td>
+            <td>{{ contract.due_date|date_pl }}</td>
+            <td>{{ contract.total_repayment_cents|money }}</td>
+            <td><span class="status">{{ contract.status|status_label }}</span></td>
+            <td><a href="{{ url_for('lombard.contract_detail', contract_id=contract.id) }}">Otwórz</a></td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  {% else %}
+    <p class="empty">Ten klient nie ma jeszcze umów.</p>
+  {% endif %}
+</section>
+{% endblock %}
