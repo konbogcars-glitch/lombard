@@ -32,7 +32,7 @@ Katalog `instance/` nie powinien być commitowany do repozytorium.
 ## Testy
 
 ```bash
-python -m unittest
+python -m unittest discover -s tests
 ```
 
 ## Zakres MVP
