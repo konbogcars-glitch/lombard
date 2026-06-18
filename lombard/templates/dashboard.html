@@ -1,0 +1,65 @@
+{% extends "base.html" %}
+{% block title %}Panel lombardu{% endblock %}
+{% block content %}
+<section class="hero">
+  <div>
+    <h1>Panel lombardu</h1>
+    <p>Wspólna baza klientów, umów i ewidencji dla trzech punktów.</p>
+  </div>
+  <a class="button primary" href="{{ url_for('lombard.contract_new') }}">Utwórz umowę</a>
+</section>
+
+<section class="cards">
+  <article class="card">
+    <span class="label">Wszystkie umowy</span>
+    <strong>{{ stats.contracts_total or 0 }}</strong>
+  </article>
+  <article class="card">
+    <span class="label">Aktywne</span>
+    <strong>{{ stats.active_count or 0 }}</strong>
+  </article>
+  <article class="card">
+    <span class="label">Spłacone</span>
+    <strong>{{ stats.settled_count or 0 }}</strong>
+  </article>
+  <article class="card warning">
+    <span class="label">Do księgowania</span>
+    <strong>{{ stats.accounting_pending or 0 }}</strong>
+  </article>
+</section>
+
+<section class="panel">
+  <div class="panel-heading">
+    <h2>Najbliższe terminy spłaty</h2>
+    <a href="{{ url_for('lombard.archive', status='active') }}">Pokaż aktywne</a>
+  </div>
+  {% if upcoming %}
+    <table>
+      <thead>
+        <tr>
+          <th>Nr</th>
+          <th>Klient</th>
+          <th>Punkt</th>
+          <th>Termin</th>
+          <th>Do spłaty</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for contract in upcoming %}
+          <tr class="{% if contract.due_date < today.isoformat() %}overdue{% endif %}">
+            <td>{{ contract.contract_number }}</td>
+            <td>{{ contract.first_name }} {{ contract.last_name }}</td>
+            <td>{{ contract.branch_city }}</td>
+            <td>{{ contract.due_date|date_pl }}</td>
+            <td>{{ contract.total_repayment_cents|money }}</td>
+            <td><a href="{{ url_for('lombard.contract_detail', contract_id=contract.id) }}">Otwórz</a></td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  {% else %}
+    <p class="empty">Brak aktywnych umów.</p>
+  {% endif %}
+</section>
+{% endblock %}
