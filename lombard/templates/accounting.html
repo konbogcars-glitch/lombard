@@ -8,10 +8,9 @@
       <p class="muted">Po spłacie albo sprzedaży zabezpieczenia wyeksportuj CSV i oznacz wysłane pozycje jako zaksięgowane.</p>
     </div>
     <div class="actions">
-      {% set branch_export = selected_branch_id if selected_branch_id else ('all' if showing_all_branches else none) %}
-      <a class="button primary" href="{{ url_for('lombard.accounting_export', branch_id=branch_export) if branch_export else url_for('lombard.accounting_export') }}">Eksport CSV do wysłania</a>
-      <a class="button" href="{{ url_for('lombard.accounting_package', branch_id=branch_export) if branch_export else url_for('lombard.accounting_package') }}">Paczka ZIP dla księgowej</a>
-      <a class="button" href="{{ url_for('lombard.accounting_export', include_sent=1, branch_id=branch_export) if branch_export else url_for('lombard.accounting_export', include_sent=1) }}">Eksport CSV wszystko</a>
+      <a class="button primary" href="{{ accounting_export_url }}">Eksport CSV do wysłania</a>
+      <a class="button" href="{{ accounting_package_url }}">Paczka ZIP dla księgowej</a>
+      <a class="button" href="{{ accounting_export_all_url }}">Eksport CSV wszystko</a>
     </div>
   </div>
 
@@ -22,6 +21,12 @@
         <option value="{{ branch.id }}" {% if selected_branch_id == branch.id %}selected{% endif %}>{{ branch.city }}</option>
       {% endfor %}
     </select>
+    <label>Od
+      <input type="date" name="date_from" value="{{ selected_date_from }}">
+    </label>
+    <label>Do
+      <input type="date" name="date_to" value="{{ selected_date_to }}">
+    </label>
     <button class="button">Filtruj</button>
   </form>
 
@@ -50,6 +55,14 @@
     <form method="post" action="{{ url_for('lombard.accounting_bulk_account') }}" class="bulk-accounting">
       {% if selected_branch_id %}
         <input type="hidden" name="branch_id" value="{{ selected_branch_id }}">
+      {% elif showing_all_branches %}
+        <input type="hidden" name="branch_id" value="all">
+      {% endif %}
+      {% if selected_date_from %}
+        <input type="hidden" name="date_from" value="{{ selected_date_from }}">
+      {% endif %}
+      {% if selected_date_to %}
+        <input type="hidden" name="date_to" value="{{ selected_date_to }}">
       {% endif %}
       <label>Notatka zbiorcza
         <input name="accounting_note" placeholder="np. CSV wysłany mailem do księgowej">

@@ -403,6 +403,83 @@ class AppFlowTest(unittest.TestCase):
         self.assertIn(bus_contract["contract_number"], csv_data)
         self.assertNotIn(chm_contract["contract_number"], csv_data)
 
+    def test_accounting_period_filter_limits_exports_package_and_bulk_accounting(self):
+        january_client = self._create_client(first_name="Anna", pesel="80010112345")
+        february_client = self._create_client(first_name="Ewa", pesel="81010112345")
+        january_contract = self._create_contract(
+            client_id=january_client,
+            issue_date="2026-01-01",
+        )
+        february_contract = self._create_contract(
+            client_id=february_client,
+            issue_date="2026-02-01",
+        )
+
+        response = self.client.post(
+            f"/contracts/{january_contract['id']}/settle",
+            data={"payment_date": "2026-01-07", "paid_amount": ""},
+            follow_redirects=True,
+        )
+        self.assertEqual(response.status_code, 200)
+        response = self.client.post(
+            f"/contracts/{february_contract['id']}/settle",
+            data={"payment_date": "2026-02-07", "paid_amount": ""},
+            follow_redirects=True,
+        )
+        self.assertEqual(response.status_code, 200)
+
+        filter_query = "date_from=2026-02-01&date_to=2026-02-28"
+        page_response = self.client.get(f"/accounting?{filter_query}")
+        self.assertEqual(page_response.status_code, 200)
+        page = page_response.get_data(as_text=True)
+        self.assertIn(february_contract["contract_number"], page)
+        self.assertNotIn(january_contract["contract_number"], page)
+        self.assertIn('value="2026-02-01"', page)
+        self.assertIn('value="2026-02-28"', page)
+
+        csv_response = self.client.get(f"/accounting/export.csv?{filter_query}")
+        self.assertEqual(csv_response.status_code, 200)
+        csv_data = csv_response.get_data(as_text=True)
+        self.assertIn(february_contract["contract_number"], csv_data)
+        self.assertNotIn(january_contract["contract_number"], csv_data)
+
+        package_response = self.client.get(f"/accounting/package.zip?{filter_query}")
+        self.assertEqual(package_response.status_code, 200)
+        with zipfile.ZipFile(io.BytesIO(package_response.get_data())) as archive:
+            names = archive.namelist()
+            self.assertIn("umowy/umowa_BUS_2026_0002.pdf", names)
+            self.assertNotIn("umowy/umowa_BUS_2026_0001.pdf", names)
+
+        bulk_response = self.client.post(
+            "/accounting/bulk-account",
+            data={
+                "date_from": "2026-02-01",
+                "date_to": "2026-02-28",
+                "accounting_note": "wysłano za luty",
+            },
+            follow_redirects=True,
+        )
+        self.assertEqual(bulk_response.status_code, 200)
+
+        with self.app.app_context():
+            rows = get_db().execute(
+                """
+                SELECT contract_number, status, accounting_note
+                FROM contracts
+                WHERE id IN (?, ?)
+                ORDER BY contract_number
+                """,
+                (january_contract["id"], february_contract["id"]),
+            ).fetchall()
+
+        by_number = {row["contract_number"]: row for row in rows}
+        self.assertEqual(by_number[january_contract["contract_number"]]["status"], "settled")
+        self.assertEqual(by_number[february_contract["contract_number"]]["status"], "accounted")
+        self.assertEqual(
+            by_number[february_contract["contract_number"]]["accounting_note"],
+            "wysłano za luty",
+        )
+
     def test_bulk_accounting_marks_only_selected_branch(self):
         bus_client = self._create_client(first_name="Anna", pesel="80010112345")
         chm_client = self._create_client(first_name="Ewa", pesel="81010112345")

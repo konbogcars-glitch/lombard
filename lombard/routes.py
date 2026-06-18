@@ -122,19 +122,74 @@ def _branch_label(branch_id: int | None) -> str:
     return branch["city"] if branch else "wybrany punkt"
 
 
-def _accounting_mailto_url(settings: dict, *, branch_id: int | None) -> str | None:
+def _normalize_date_filter(value: str, label: str) -> str:
+    normalized = value.strip()
+    if not normalized:
+        return ""
+    try:
+        _parse_date(normalized)
+    except ValueError:
+        flash(f"Pominięto nieprawidłową datę filtra: {label}.", "warning")
+        return ""
+    return normalized
+
+
+def _date_filter_from_args(name: str, label: str) -> str:
+    return _normalize_date_filter(request.args.get(name, ""), label)
+
+
+def _accounting_period_label(date_from: str = "", date_to: str = "") -> str:
+    if date_from and date_to:
+        return f"okres od {date_from} do {date_to}"
+    if date_from:
+        return f"okres od {date_from}"
+    if date_to:
+        return f"okres do {date_to}"
+    return "wszystkie rozliczone okresy"
+
+
+def _accounting_filter_url_args(
+    *,
+    branch_id: int | None,
+    showing_all_branches: bool,
+    date_from: str = "",
+    date_to: str = "",
+    include_sent: bool = False,
+) -> dict:
+    args: dict[str, int | str] = {}
+    if branch_id:
+        args["branch_id"] = branch_id
+    elif showing_all_branches:
+        args["branch_id"] = "all"
+    if date_from:
+        args["date_from"] = date_from
+    if date_to:
+        args["date_to"] = date_to
+    if include_sent:
+        args["include_sent"] = 1
+    return args
+
+
+def _accounting_mailto_url(
+    settings: dict,
+    *,
+    branch_id: int | None,
+    date_from: str = "",
+    date_to: str = "",
+) -> str | None:
     email = settings["email"].strip()
     if not email:
         return None
 
     branch_label = _branch_label(branch_id)
-    subject = f"Ewidencja umów lombardowych - {branch_label} - {_today().isoformat()}"
+    period_label = _accounting_period_label(date_from, date_to)
+    subject = f"Ewidencja umów lombardowych - {branch_label} - {period_label}"
     greeting = f"Dzień dobry {settings['name']}," if settings["name"].strip() else "Dzień dobry,"
     body = "\n\n".join(
         [
             greeting,
             "W załączeniu przesyłam paczkę ZIP z ewidencją CSV oraz PDF-ami rozliczonych umów lombardowych.",
-            f"Zakres: {branch_label}.",
+            f"Zakres: {branch_label}, {period_label}.",
             "Proszę o zaksięgowanie przesłanych pozycji.",
             "Pozdrawiam",
         ]
@@ -713,15 +768,26 @@ def contract_template_settings() -> str | Response:
 
 @bp.route("/accounting/bulk-account", methods=["POST"])
 def accounting_bulk_account() -> Response:
-    branch_id = request.form.get("branch_id", type=int)
+    raw_branch_id = request.form.get("branch_id", "").strip()
+    showing_all_branches = raw_branch_id == "all"
+    branch_id = int(raw_branch_id) if raw_branch_id and not showing_all_branches else None
+    date_from = _normalize_date_filter(request.form.get("date_from", ""), "data od")
+    date_to = _normalize_date_filter(request.form.get("date_to", ""), "data do")
     accounting_note = request.form.get("accounting_note", "").strip()
     now = datetime.now().isoformat(timespec="seconds")
 
-    branch_clause = ""
     params: list[int | str] = [now, now, accounting_note]
+    clauses = ["status IN ('settled', 'sold')"]
     if branch_id:
-        branch_clause = "AND branch_id = ?"
+        clauses.append("branch_id = ?")
         params.append(branch_id)
+    if date_from:
+        clauses.append("COALESCE(payment_date, realization_date) >= ?")
+        params.append(date_from)
+    if date_to:
+        clauses.append("COALESCE(payment_date, realization_date) <= ?")
+        params.append(date_to)
+    where = " AND ".join(clauses)
 
     cursor = get_db().execute(
         f"""
@@ -731,8 +797,7 @@ def accounting_bulk_account() -> Response:
             accountant_sent_at = ?,
             accounting_note = ?,
             updated_at = CURRENT_TIMESTAMP
-        WHERE status IN ('settled', 'sold')
-        {branch_clause}
+        WHERE {where}
         """,
         tuple(params),
     )
@@ -742,7 +807,13 @@ def accounting_bulk_account() -> Response:
         flash(f"Oznaczono jako wysłane do księgowej: {cursor.rowcount}.", "success")
     else:
         flash("Brak spłaconych lub zrealizowanych umów do oznaczenia dla wybranego filtra.", "warning")
-    return redirect(url_for("lombard.accounting", branch_id=branch_id) if branch_id else url_for("lombard.accounting"))
+    redirect_args = _accounting_filter_url_args(
+        branch_id=branch_id,
+        showing_all_branches=showing_all_branches,
+        date_from=date_from,
+        date_to=date_to,
+    )
+    return redirect(url_for("lombard.accounting", **redirect_args))
 
 
 @bp.route("/contracts/<int:contract_id>/pdf")
@@ -805,47 +876,72 @@ def archive() -> str:
 @bp.route("/accounting")
 def accounting() -> str:
     branch_id, showing_all_branches = _branch_id_from_args()
-    params: list[int] = []
-    branch_clause = ""
-    if branch_id:
-        branch_clause = "AND contracts.branch_id = ?"
-        params.append(branch_id)
-
-    contracts = query_all(
-        f"""
-        SELECT contracts.*, clients.first_name, clients.last_name, branches.city AS branch_city
-        FROM contracts
-        JOIN clients ON clients.id = contracts.client_id
-        JOIN branches ON branches.id = contracts.branch_id
-        WHERE contracts.status IN ('settled', 'sold', 'accounted')
-        {branch_clause}
-        ORDER BY COALESCE(contracts.payment_date, contracts.realization_date) DESC, contracts.id DESC
-        """,
-        tuple(params),
+    date_from = _date_filter_from_args("date_from", "data od")
+    date_to = _date_filter_from_args("date_to", "data do")
+    contracts = _accounting_rows(
+        branch_id=branch_id,
+        include_sent=True,
+        date_from=date_from,
+        date_to=date_to,
     )
     branches = _branch_options()
     accountant_settings = _accountant_settings()
+    export_args = _accounting_filter_url_args(
+        branch_id=branch_id,
+        showing_all_branches=showing_all_branches,
+        date_from=date_from,
+        date_to=date_to,
+    )
+    export_all_args = _accounting_filter_url_args(
+        branch_id=branch_id,
+        showing_all_branches=showing_all_branches,
+        date_from=date_from,
+        date_to=date_to,
+        include_sent=True,
+    )
     return render_template(
         "accounting.html",
         contracts=contracts,
         branches=branches,
         selected_branch_id=branch_id,
         showing_all_branches=showing_all_branches,
+        selected_date_from=date_from,
+        selected_date_to=date_to,
         accountant_settings=accountant_settings,
-        accounting_mailto_url=_accounting_mailto_url(accountant_settings, branch_id=branch_id),
+        accounting_mailto_url=_accounting_mailto_url(
+            accountant_settings,
+            branch_id=branch_id,
+            date_from=date_from,
+            date_to=date_to,
+        ),
+        accounting_export_url=url_for("lombard.accounting_export", **export_args),
+        accounting_package_url=url_for("lombard.accounting_package", **export_args),
+        accounting_export_all_url=url_for("lombard.accounting_export", **export_all_args),
     )
 
 
-def _accounting_rows(*, branch_id: int | None, include_sent: bool) -> list[dict]:
+def _accounting_rows(
+    *,
+    branch_id: int | None,
+    include_sent: bool,
+    date_from: str = "",
+    date_to: str = "",
+) -> list[dict]:
     clauses = [
         "contracts.status IN ('settled', 'sold', 'accounted')"
         if include_sent
         else "contracts.status IN ('settled', 'sold')"
     ]
-    params: list[int] = []
+    params: list[int | str] = []
     if branch_id:
         clauses.append("contracts.branch_id = ?")
         params.append(branch_id)
+    if date_from:
+        clauses.append("COALESCE(contracts.payment_date, contracts.realization_date) >= ?")
+        params.append(date_from)
+    if date_to:
+        clauses.append("COALESCE(contracts.payment_date, contracts.realization_date) <= ?")
+        params.append(date_to)
     where = " AND ".join(clauses)
     return query_all(
         f"""
@@ -916,7 +1012,16 @@ def _contract_file_stem(contract_number: str) -> str:
 def accounting_export() -> Response:
     include_sent = request.args.get("include_sent") == "1"
     branch_id, _ = _branch_id_from_args()
-    csv_data = _accounting_csv(_accounting_rows(branch_id=branch_id, include_sent=include_sent))
+    date_from = _date_filter_from_args("date_from", "data od")
+    date_to = _date_filter_from_args("date_to", "data do")
+    csv_data = _accounting_csv(
+        _accounting_rows(
+            branch_id=branch_id,
+            include_sent=include_sent,
+            date_from=date_from,
+            date_to=date_to,
+        )
+    )
     return Response(
         csv_data,
         mimetype="text/csv; charset=utf-8",
@@ -928,7 +1033,14 @@ def accounting_export() -> Response:
 def accounting_package() -> Response:
     include_sent = request.args.get("include_sent") == "1"
     branch_id, _ = _branch_id_from_args()
-    rows = _accounting_rows(branch_id=branch_id, include_sent=include_sent)
+    date_from = _date_filter_from_args("date_from", "data od")
+    date_to = _date_filter_from_args("date_to", "data do")
+    rows = _accounting_rows(
+        branch_id=branch_id,
+        include_sent=include_sent,
+        date_from=date_from,
+        date_to=date_to,
+    )
 
     archive_buffer = io.BytesIO()
     with zipfile.ZipFile(archive_buffer, mode="w", compression=zipfile.ZIP_DEFLATED) as archive:
