@@ -182,8 +182,11 @@ class AppFlowTest(unittest.TestCase):
         file_response = self.client.get(
             f"/uploads/{contract['id']}/{photo['stored_filename']}"
         )
-        self.assertEqual(file_response.status_code, 200)
-        self.assertEqual(file_response.get_data(), b"fake image bytes")
+        try:
+            self.assertEqual(file_response.status_code, 200)
+            self.assertEqual(file_response.get_data(), b"fake image bytes")
+        finally:
+            file_response.close()
 
     def test_overdue_status_and_accounting_transitions_are_guarded(self):
         contract = self._create_contract(issue_date="2025-01-01", term_days="1")
