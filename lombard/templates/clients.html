@@ -1,0 +1,66 @@
+{% extends "base.html" %}
+{% block title %}Kartoteka klientów{% endblock %}
+{% block content %}
+<section class="split">
+  <div class="panel">
+    <div class="panel-heading">
+      <h1>Kartoteka klientów</h1>
+    </div>
+    <form method="get" class="search">
+      <input name="q" value="{{ search }}" placeholder="Szukaj: nazwisko, PESEL, dokument, telefon">
+      <button class="button">Szukaj</button>
+    </form>
+    {% if clients %}
+      <table>
+        <thead>
+          <tr>
+            <th>Klient</th>
+            <th>PESEL</th>
+            <th>Dokument</th>
+            <th>Telefon</th>
+            <th>Umowy</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for client in clients %}
+            <tr>
+              <td>{{ client.last_name }} {{ client.first_name }}</td>
+              <td>{{ client.pesel or "-" }}</td>
+              <td>{{ client.document_number or "-" }}</td>
+              <td>{{ client.phone or "-" }}</td>
+              <td>{{ client.contracts_count }}</td>
+              <td>
+                <a href="{{ url_for('lombard.client_detail', client_id=client.id) }}">Otwórz</a>
+                <a href="{{ url_for('lombard.client_edit', client_id=client.id) }}">Edytuj</a>
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    {% else %}
+      <p class="empty">Nie znaleziono klientów.</p>
+    {% endif %}
+  </div>
+
+  <aside class="panel">
+    <h2>Dodaj klienta</h2>
+    <form method="post" class="form">
+      <label>Imię <input name="first_name" required></label>
+      <label>Nazwisko <input name="last_name" required></label>
+      <label>PESEL <input name="pesel"></label>
+      <label>Typ dokumentu <input name="document_type" value="Dowód Osobisty" required></label>
+      <label>Numer dokumentu <input name="document_number"></label>
+      <label>Telefon <input name="phone"></label>
+      <label>Email <input type="email" name="email"></label>
+      <label>Adres zamieszkania <input name="street_address" required></label>
+      <div class="row">
+        <label>Kod pocztowy <input name="postal_code"></label>
+        <label>Miejscowość <input name="city" required></label>
+      </div>
+      <label>Notatki <textarea name="notes" rows="3"></textarea></label>
+      <button class="button primary">Zapisz klienta</button>
+    </form>
+  </aside>
+</section>
+{% endblock %}

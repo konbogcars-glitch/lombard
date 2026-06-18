@@ -1,0 +1,170 @@
+{% extends "base.html" %}
+{% block title %}Ewidencja dla księgowej{% endblock %}
+{% block content %}
+<section class="panel">
+  <div class="panel-heading">
+    <div>
+      <h1>Ewidencja dla księgowej</h1>
+      <p class="muted">Po spłacie albo sprzedaży zabezpieczenia wyeksportuj CSV i oznacz wysłane pozycje jako zaksięgowane.</p>
+    </div>
+    <div class="actions">
+      <a class="button primary" href="{{ accounting_export_url }}">Eksport CSV do wysłania</a>
+      <a class="button" href="{{ accounting_package_url }}">Paczka ZIP dla księgowej</a>
+      <a class="button" href="{{ accounting_export_all_url }}">Eksport CSV wszystko</a>
+    </div>
+  </div>
+
+  <form method="get" class="filters">
+    <select name="branch_id">
+      <option value="all" {% if not selected_branch_id %}selected{% endif %}>Wszystkie punkty</option>
+      {% for branch in branches %}
+        <option value="{{ branch.id }}" {% if selected_branch_id == branch.id %}selected{% endif %}>{{ branch.city }}</option>
+      {% endfor %}
+    </select>
+    <label>Od
+      <input type="date" name="date_from" value="{{ selected_date_from }}">
+    </label>
+    <label>Do
+      <input type="date" name="date_to" value="{{ selected_date_to }}">
+    </label>
+    <button class="button">Filtruj</button>
+  </form>
+
+  <section class="accountant-panel">
+    <form method="post" action="{{ url_for('lombard.accounting_settings') }}" class="accountant-settings">
+      <input type="hidden" name="next" value="{{ request.full_path if request.query_string else request.path }}">
+      <label>Email księgowej
+        <input type="email" name="accountant_email" value="{{ accountant_settings.email }}" placeholder="ksiegowa@example.com">
+      </label>
+      <label>Imię lub nazwa kontaktu
+        <input name="accountant_name" value="{{ accountant_settings.name }}" placeholder="np. Pani Anno">
+      </label>
+      <button class="button">Zapisz kontakt</button>
+    </form>
+    <div class="send-help">
+      {% if accounting_mailto_url %}
+        <a class="button primary" href="{{ accounting_mailto_url }}">Przygotuj e-mail do księgowej</a>
+        <p class="muted">Najpierw pobierz paczkę ZIP, potem dołącz ją do przygotowanej wiadomości.</p>
+      {% else %}
+        <p class="muted">Zapisz email księgowej, aby program przygotował temat i treść wiadomości do wysyłki ewidencji.</p>
+      {% endif %}
+    </div>
+  </section>
+
+  {% if accounting_batches %}
+    <section class="batch-panel">
+      <div>
+        <h2>Archiwum wysyłek do księgowej</h2>
+        <p class="muted">Każde oznaczenie jako wysłane tworzy paczkę, którą można pobrać ponownie jako dokładny CSV albo ZIP.</p>
+      </div>
+      <table>
+        <thead>
+          <tr>
+            <th>Paczka</th>
+            <th>Data</th>
+            <th>Punkt</th>
+            <th>Okres</th>
+            <th>Umowy</th>
+            <th>Księgowa</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for batch in accounting_batches %}
+            <tr>
+              <td>#{{ batch.id }}</td>
+              <td>{{ batch.created_at }}</td>
+              <td>{{ batch.branch_city or "wszystkie punkty" }}</td>
+              <td>
+                {% if batch.date_from and batch.date_to %}
+                  {{ batch.date_from|date_pl }} - {{ batch.date_to|date_pl }}
+                {% elif batch.date_from %}
+                  od {{ batch.date_from|date_pl }}
+                {% elif batch.date_to %}
+                  do {{ batch.date_to|date_pl }}
+                {% else %}
+                  wszystkie rozliczenia
+                {% endif %}
+              </td>
+              <td>{{ batch.contracts_count }}</td>
+              <td>{{ batch.accountant_email or "nie zapisano" }}</td>
+              <td>
+                <a href="{{ url_for('lombard.accounting_batch_export', batch_id=batch.id) }}">CSV</a>
+                <a href="{{ url_for('lombard.accounting_batch_package', batch_id=batch.id) }}">ZIP</a>
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </section>
+  {% endif %}
+
+  {% if contracts %}
+    <form method="post" action="{{ url_for('lombard.accounting_bulk_account') }}" class="bulk-accounting">
+      {% if selected_branch_id %}
+        <input type="hidden" name="branch_id" value="{{ selected_branch_id }}">
+      {% elif showing_all_branches %}
+        <input type="hidden" name="branch_id" value="all">
+      {% endif %}
+      {% if selected_date_from %}
+        <input type="hidden" name="date_from" value="{{ selected_date_from }}">
+      {% endif %}
+      {% if selected_date_to %}
+        <input type="hidden" name="date_to" value="{{ selected_date_to }}">
+      {% endif %}
+      <label>Notatka zbiorcza
+        <input name="accounting_note" placeholder="np. CSV wysłany mailem do księgowej">
+      </label>
+      <button class="button">Oznacz pozycje z tego filtra jako wysłane</button>
+    </form>
+
+    <table>
+      <thead>
+        <tr>
+          <th>Nr</th>
+          <th>Klient</th>
+          <th>Punkt</th>
+          <th>Realizacja</th>
+          <th>Kwota</th>
+          <th>Zwrot</th>
+          <th>Niedobór</th>
+          <th>Status</th>
+          <th>Księgowa</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for contract in contracts %}
+          <tr>
+            <td>{{ contract.contract_number }}</td>
+            <td>{{ contract.first_name }} {{ contract.last_name }}</td>
+            <td>{{ contract.branch_city }}</td>
+            <td>
+              {% if contract.realization_date %}
+                sprzedaż · {{ contract.realization_date|date_pl }}
+              {% else %}
+                spłata · {{ contract.payment_date|date_pl }}
+              {% endif %}
+            </td>
+            <td>{{ (contract.sale_amount_cents if contract.realization_date else contract.paid_amount_cents)|money }}</td>
+            <td>{{ contract.surplus_return_cents|money if contract.realization_date else "-" }}</td>
+            <td>{{ contract.shortfall_cents|money if contract.realization_date else "-" }}</td>
+            <td><span class="status">{{ contract.status|status_label }}</span></td>
+            <td>{{ contract.accountant_sent_at or "do wysłania" }}</td>
+            <td>
+              <a href="{{ url_for('lombard.contract_detail', contract_id=contract.id) }}">Otwórz</a>
+              {% if contract.status in ["settled", "sold"] %}
+                <form method="post" action="{{ url_for('lombard.contract_account', contract_id=contract.id) }}" class="table-form">
+                  <button class="link-button">Oznacz wysłaną</button>
+                </form>
+              {% endif %}
+            </td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  {% else %}
+    <p class="empty">Brak spłaconych lub zrealizowanych umów do księgowania.</p>
+  {% endif %}
+</section>
+{% endblock %}
