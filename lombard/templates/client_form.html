@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+{% block title %}Edycja klienta{% endblock %}
+{% block content %}
+<section class="hero">
+  <div>
+    <h1>Edycja danych klienta</h1>
+    <p>Poprawione dane będą widoczne w kartotece, historii umów i kolejnych wydrukach umów.</p>
+  </div>
+  <a class="button" href="{{ url_for('lombard.client_detail', client_id=client.id) }}">Wróć do klienta</a>
+</section>
+
+<form method="post" class="panel form">
+  <div class="row">
+    <label>Imię <input name="first_name" value="{{ client.first_name }}" required></label>
+    <label>Nazwisko <input name="last_name" value="{{ client.last_name }}" required></label>
+  </div>
+  <div class="row">
+    <label>PESEL <input name="pesel" value="{{ client.pesel or '' }}"></label>
+    <label>Typ dokumentu <input name="document_type" value="{{ client.document_type }}" required></label>
+    <label>Numer dokumentu <input name="document_number" value="{{ client.document_number or '' }}"></label>
+  </div>
+  <div class="row">
+    <label>Telefon <input name="phone" value="{{ client.phone or '' }}"></label>
+    <label>Email <input type="email" name="email" value="{{ client.email or '' }}"></label>
+  </div>
+  <label>Adres zamieszkania <input name="street_address" value="{{ client.street_address }}" required></label>
+  <div class="row">
+    <label>Kod pocztowy <input name="postal_code" value="{{ client.postal_code or '' }}"></label>
+    <label>Miejscowość <input name="city" value="{{ client.city }}" required></label>
+  </div>
+  <label>Notatki <textarea name="notes" rows="4">{{ client.notes or '' }}</textarea></label>
+  <div class="actions">
+    <button class="button primary">Zapisz zmiany</button>
+    <a class="button" href="{{ url_for('lombard.client_detail', client_id=client.id) }}">Anuluj</a>
+  </div>
+</form>
+{% endblock %}
