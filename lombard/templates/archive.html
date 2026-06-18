@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+{% block title %}Archiwum umów{% endblock %}
+{% block content %}
+<section class="panel">
+  <div class="panel-heading">
+    <h1>Archiwum umów</h1>
+    <a class="button primary" href="{{ url_for('lombard.contract_new') }}">Nowa umowa</a>
+  </div>
+  <form method="get" class="filters">
+    <input name="q" value="{{ q }}" placeholder="Numer umowy, klient, PESEL">
+    <select name="status">
+      <option value="">Wszystkie statusy</option>
+      {% for value, label in {"active":"aktywna","settled":"spłacona","accounted":"zaksięgowana","expired":"po terminie","sold":"sprzedana"}.items() %}
+        <option value="{{ value }}" {% if selected_status == value %}selected{% endif %}>{{ label }}</option>
+      {% endfor %}
+    </select>
+    <select name="branch_id">
+      <option value="all" {% if not selected_branch_id %}selected{% endif %}>Wszystkie punkty</option>
+      {% for branch in branches %}
+        <option value="{{ branch.id }}" {% if selected_branch_id == branch.id %}selected{% endif %}>{{ branch.city }}</option>
+      {% endfor %}
+    </select>
+    <button class="button">Filtruj</button>
+  </form>
+
+  {% if contracts %}
+    <table>
+      <thead>
+        <tr>
+          <th>Nr</th>
+          <th>Klient</th>
+          <th>Punkt</th>
+          <th>Data</th>
+          <th>Termin</th>
+          <th>Kwota</th>
+          <th>Status</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for contract in contracts %}
+          <tr>
+            <td>{{ contract.contract_number }}</td>
+            <td>{{ contract.first_name }} {{ contract.last_name }}</td>
+            <td>{{ contract.branch_city }}</td>
+            <td>{{ contract.issue_date|date_pl }}</td>
+            <td>{{ contract.due_date|date_pl }}</td>
+            <td>{{ contract.total_repayment_cents|money }}</td>
+            <td><span class="status">{{ contract.status|status_label }}</span></td>
+            <td><a href="{{ url_for('lombard.contract_detail', contract_id=contract.id) }}">Otwórz</a></td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  {% else %}
+    <p class="empty">Brak umów dla wybranych filtrów.</p>
+  {% endif %}
+</section>
+{% endblock %}
