@@ -287,6 +287,55 @@ class AppFlowTest(unittest.TestCase):
         self.assertIn(bus_contract["contract_number"], csv_data)
         self.assertNotIn(chm_contract["contract_number"], csv_data)
 
+    def test_bulk_accounting_marks_only_selected_branch(self):
+        bus_client = self._create_client(first_name="Anna", pesel="80010112345")
+        chm_client = self._create_client(first_name="Ewa", pesel="81010112345")
+        bus_contract = self._create_contract(
+            branch_code="BUS",
+            client_id=bus_client,
+            issue_date="2026-03-01",
+        )
+        chm_contract = self._create_contract(
+            branch_code="CHM",
+            client_id=chm_client,
+            issue_date="2026-03-01",
+        )
+
+        for contract in (bus_contract, chm_contract):
+            response = self.client.post(
+                f"/contracts/{contract['id']}/settle",
+                data={"payment_date": "2026-03-07", "paid_amount": ""},
+                follow_redirects=True,
+            )
+            self.assertEqual(response.status_code, 200)
+
+        branch_id = self._branch_id("BUS")
+        response = self.client.post(
+            "/accounting/bulk-account",
+            data={"branch_id": branch_id, "accounting_note": "CSV wysłany zbiorczo"},
+            follow_redirects=True,
+        )
+        self.assertEqual(response.status_code, 200)
+
+        with self.app.app_context():
+            rows = get_db().execute(
+                """
+                SELECT contract_number, status, accounting_note
+                FROM contracts
+                WHERE id IN (?, ?)
+                ORDER BY contract_number
+                """,
+                (bus_contract["id"], chm_contract["id"]),
+            ).fetchall()
+
+        by_number = {row["contract_number"]: row for row in rows}
+        self.assertEqual(by_number[bus_contract["contract_number"]]["status"], "accounted")
+        self.assertEqual(
+            by_number[bus_contract["contract_number"]]["accounting_note"],
+            "CSV wysłany zbiorczo",
+        )
+        self.assertEqual(by_number[chm_contract["contract_number"]]["status"], "settled")
+
 
 if __name__ == "__main__":
     unittest.main()

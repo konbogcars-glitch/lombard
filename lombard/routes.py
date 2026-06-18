@@ -391,6 +391,40 @@ def contract_account(contract_id: int) -> Response:
     return redirect(url_for("lombard.accounting"))
 
 
+@bp.route("/accounting/bulk-account", methods=["POST"])
+def accounting_bulk_account() -> Response:
+    branch_id = request.form.get("branch_id", type=int)
+    accounting_note = request.form.get("accounting_note", "").strip()
+    now = datetime.now().isoformat(timespec="seconds")
+
+    branch_clause = ""
+    params: list[int | str] = [now, now, accounting_note]
+    if branch_id:
+        branch_clause = "AND branch_id = ?"
+        params.append(branch_id)
+
+    cursor = get_db().execute(
+        f"""
+        UPDATE contracts
+        SET status = 'accounted',
+            accounted_at = COALESCE(accounted_at, ?),
+            accountant_sent_at = ?,
+            accounting_note = ?,
+            updated_at = CURRENT_TIMESTAMP
+        WHERE status = 'settled'
+        {branch_clause}
+        """,
+        tuple(params),
+    )
+    get_db().commit()
+
+    if cursor.rowcount:
+        flash(f"Oznaczono jako wysłane do księgowej: {cursor.rowcount}.", "success")
+    else:
+        flash("Brak spłaconych umów do oznaczenia dla wybranego filtra.", "warning")
+    return redirect(url_for("lombard.accounting", branch_id=branch_id) if branch_id else url_for("lombard.accounting"))
+
+
 @bp.route("/contracts/<int:contract_id>/pdf")
 def contract_pdf(contract_id: int) -> Response:
     contract = _contract_or_404(contract_id)

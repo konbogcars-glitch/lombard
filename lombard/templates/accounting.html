@@ -5,7 +5,7 @@
   <div class="panel-heading">
     <div>
       <h1>Ewidencja dla księgowej</h1>
-      <p class="muted">Po spłacie umowy oznacz ją jako wysłaną do księgowej.</p>
+      <p class="muted">Po spłacie umowy wyeksportuj CSV i oznacz wysłane pozycje jako zaksięgowane.</p>
     </div>
     <div class="actions">
       <a class="button primary" href="{{ url_for('lombard.accounting_export', branch_id=selected_branch_id) if selected_branch_id else url_for('lombard.accounting_export') }}">Eksport CSV do wysłania</a>
@@ -24,6 +24,16 @@
   </form>
 
   {% if contracts %}
+    <form method="post" action="{{ url_for('lombard.accounting_bulk_account') }}" class="bulk-accounting">
+      {% if selected_branch_id %}
+        <input type="hidden" name="branch_id" value="{{ selected_branch_id }}">
+      {% endif %}
+      <label>Notatka zbiorcza
+        <input name="accounting_note" placeholder="np. CSV wysłany mailem do księgowej">
+      </label>
+      <button class="button">Oznacz spłacone z tego filtra jako wysłane</button>
+    </form>
+
     <table>
       <thead>
         <tr>
