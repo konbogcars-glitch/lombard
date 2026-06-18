@@ -48,6 +48,26 @@ a:hover {
   gap: 14px;
 }
 
+.branch-context {
+  align-items: end;
+  display: flex;
+  gap: 8px;
+  min-width: 220px;
+}
+
+.branch-context label {
+  color: #cbd5e1;
+  font-size: 12px;
+  width: 100%;
+}
+
+.branch-context select {
+  background: #111c31;
+  border-color: #334155;
+  color: #fff;
+  padding: 7px 9px;
+}
+
 .topbar a {
   color: #e7eefc;
 }
@@ -355,6 +375,7 @@ button:hover {
   }
 
   .topbar nav,
+  .branch-context,
   .filters,
   .search,
   .form.inline {

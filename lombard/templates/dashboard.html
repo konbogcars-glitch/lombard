@@ -4,7 +4,16 @@
 <section class="hero">
   <div>
     <h1>Panel lombardu</h1>
-    <p>Wspólna baza klientów, umów i ewidencji dla trzech punktów.</p>
+    <p>
+      Wspólna baza klientów, umów i ewidencji dla trzech punktów.
+      {% if selected_branch_id %}
+        {% for branch in branch_options %}
+          {% if branch.id == selected_branch_id %}Aktualny widok: {{ branch.city }}.{% endif %}
+        {% endfor %}
+      {% elif showing_all_branches or not current_branch_id %}
+        Aktualny widok: wszystkie punkty.
+      {% endif %}
+    </p>
   </div>
   <a class="button primary" href="{{ url_for('lombard.contract_new') }}">Utwórz umowę</a>
 </section>

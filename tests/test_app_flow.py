@@ -1,6 +1,7 @@
 import io
 import tempfile
 import unittest
+import zipfile
 from pathlib import Path
 
 from lombard import create_app
@@ -335,6 +336,56 @@ class AppFlowTest(unittest.TestCase):
             "CSV wysłany zbiorczo",
         )
         self.assertEqual(by_number[chm_contract["contract_number"]]["status"], "settled")
+
+    def test_branch_context_filters_dashboard_and_preselects_contract_branch(self):
+        bus_contract = self._create_contract(branch_code="BUS", issue_date="2026-04-01")
+        chm_client = self._create_client(first_name="Ewa", pesel="82010112345")
+        chm_contract = self._create_contract(
+            branch_code="CHM",
+            client_id=chm_client,
+            issue_date="2026-04-01",
+        )
+
+        branch_id = self._branch_id("CHM")
+        response = self.client.post(
+            "/context/branch",
+            data={"branch_id": branch_id, "next": "/"},
+            follow_redirects=True,
+        )
+        self.assertEqual(response.status_code, 200)
+        dashboard = response.get_data(as_text=True)
+        self.assertIn(chm_contract["contract_number"], dashboard)
+        self.assertNotIn(bus_contract["contract_number"], dashboard)
+
+        form_response = self.client.get("/contracts/new")
+        self.assertEqual(form_response.status_code, 200)
+        self.assertIn(f'value="{branch_id}" selected', form_response.get_data(as_text=True))
+
+        all_response = self.client.get("/?branch_id=all")
+        self.assertEqual(all_response.status_code, 200)
+        all_dashboard = all_response.get_data(as_text=True)
+        self.assertIn(chm_contract["contract_number"], all_dashboard)
+        self.assertIn(bus_contract["contract_number"], all_dashboard)
+
+    def test_accounting_package_contains_csv_and_contract_pdf(self):
+        contract = self._create_contract(issue_date="2026-05-01")
+        settle_response = self.client.post(
+            f"/contracts/{contract['id']}/settle",
+            data={"payment_date": "2026-05-07", "paid_amount": ""},
+            follow_redirects=True,
+        )
+        self.assertEqual(settle_response.status_code, 200)
+
+        response = self.client.get("/accounting/package.zip")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.mimetype, "application/zip")
+
+        with zipfile.ZipFile(io.BytesIO(response.get_data())) as archive:
+            names = archive.namelist()
+            self.assertIn("ewidencja_ksiegowa.csv", names)
+            self.assertIn("umowy/umowa_BUS_2026_0001.pdf", names)
+            csv_data = archive.read("ewidencja_ksiegowa.csv").decode("utf-8-sig")
+            self.assertIn(contract["contract_number"], csv_data)
 
 
 if __name__ == "__main__":

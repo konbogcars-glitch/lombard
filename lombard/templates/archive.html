@@ -15,7 +15,7 @@
       {% endfor %}
     </select>
     <select name="branch_id">
-      <option value="">Wszystkie punkty</option>
+      <option value="all" {% if not selected_branch_id %}selected{% endif %}>Wszystkie punkty</option>
       {% for branch in branches %}
         <option value="{{ branch.id }}" {% if selected_branch_id == branch.id %}selected{% endif %}>{{ branch.city }}</option>
       {% endfor %}

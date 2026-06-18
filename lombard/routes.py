@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import csv
 import io
-import os
 import uuid
+import zipfile
 from datetime import date, datetime
 from decimal import Decimal
 from pathlib import Path
@@ -19,6 +19,7 @@ from flask import (
     request,
     send_file,
     send_from_directory,
+    session,
     url_for,
 )
 from werkzeug.utils import secure_filename
@@ -44,6 +45,36 @@ def _today() -> date:
 
 def _parse_date(value: str) -> date:
     return datetime.strptime(value, "%Y-%m-%d").date()
+
+
+def _branch_options() -> list[dict]:
+    return query_all("SELECT * FROM branches ORDER BY id")
+
+
+def _current_branch_id() -> int | None:
+    branch_id = session.get("branch_context_id")
+    if branch_id is None:
+        return None
+    try:
+        return int(branch_id)
+    except (TypeError, ValueError):
+        session.pop("branch_context_id", None)
+        return None
+
+
+def _branch_id_from_args() -> tuple[int | None, bool]:
+    raw_value = request.args.get("branch_id")
+    if raw_value == "all":
+        return None, True
+    if raw_value:
+        return int(raw_value), False
+    return _current_branch_id(), False
+
+
+def _safe_redirect_target(value: str | None) -> str:
+    if value and value.startswith("/") and not value.startswith("//"):
+        return value
+    return url_for("lombard.dashboard")
 
 
 def _contract_or_404(contract_id: int) -> dict:
@@ -99,31 +130,74 @@ def _refresh_overdue_contracts(today: date | None = None) -> None:
     db.commit()
 
 
+@bp.app_context_processor
+def inject_branch_context() -> dict:
+    current_branch_id = _current_branch_id()
+    current_branch = None
+    if current_branch_id:
+        current_branch = query_one("SELECT * FROM branches WHERE id = ?", (current_branch_id,))
+    return {
+        "branch_options": _branch_options(),
+        "current_branch": current_branch,
+        "current_branch_id": current_branch_id,
+    }
+
+
+@bp.route("/context/branch", methods=["POST"])
+def set_branch_context() -> Response:
+    raw_branch_id = request.form.get("branch_id", "").strip()
+    if not raw_branch_id:
+        session.pop("branch_context_id", None)
+        flash("Pracujesz teraz na widoku wszystkich punktów.", "success")
+    else:
+        branch = query_one("SELECT * FROM branches WHERE id = ?", (int(raw_branch_id),))
+        if branch is None:
+            abort(404)
+        session["branch_context_id"] = branch["id"]
+        flash(f"Ustawiono aktywny punkt: {branch['city']}.", "success")
+    return redirect(_safe_redirect_target(request.form.get("next")))
+
+
 @bp.route("/")
 def dashboard() -> str:
     _refresh_overdue_contracts()
+    branch_id, showing_all_branches = _branch_id_from_args()
+    branch_clause = "WHERE branch_id = ?" if branch_id else ""
+    params = (branch_id,) if branch_id else ()
     stats = query_one(
-        """
+        f"""
         SELECT
             COUNT(*) AS contracts_total,
             SUM(CASE WHEN status = 'active' THEN 1 ELSE 0 END) AS active_count,
             SUM(CASE WHEN status IN ('settled', 'accounted') THEN 1 ELSE 0 END) AS settled_count,
             SUM(CASE WHEN status = 'settled' AND accountant_sent_at IS NULL THEN 1 ELSE 0 END) AS accounting_pending
         FROM contracts
-        """
+        {branch_clause}
+        """,
+        params,
     )
+    upcoming_branch_clause = "AND contracts.branch_id = ?" if branch_id else ""
     upcoming = query_all(
-        """
+        f"""
         SELECT contracts.*, clients.first_name, clients.last_name, branches.city AS branch_city
         FROM contracts
         JOIN clients ON clients.id = contracts.client_id
         JOIN branches ON branches.id = contracts.branch_id
         WHERE contracts.status = 'active'
+        {upcoming_branch_clause}
         ORDER BY contracts.due_date ASC
         LIMIT 10
-        """
+        """,
+        params,
     )
-    return render_template("dashboard.html", stats=stats, upcoming=upcoming, today=_today())
+    return render_template(
+        "dashboard.html",
+        stats=stats,
+        upcoming=upcoming,
+        today=_today(),
+        selected_branch_id=branch_id,
+        showing_all_branches=showing_all_branches,
+    )
 
 
 @bp.route("/clients", methods=["GET", "POST"])
@@ -204,8 +278,9 @@ def client_detail(client_id: int) -> str:
 def contract_new() -> str | Response:
     db = get_db()
     clients = query_all("SELECT * FROM clients ORDER BY last_name, first_name")
-    branches = query_all("SELECT * FROM branches ORDER BY id")
+    branches = _branch_options()
     selected_client_id = request.args.get("client_id", type=int)
+    selected_branch_id = request.args.get("branch_id", type=int) or _current_branch_id()
 
     if request.method == "POST":
         issue_date = _parse_date(request.form["issue_date"])
@@ -264,6 +339,7 @@ def contract_new() -> str | Response:
         clients=clients,
         branches=branches,
         selected_client_id=selected_client_id,
+        selected_branch_id=selected_branch_id,
         today=_today(),
     )
 
@@ -438,7 +514,7 @@ def contract_pdf(contract_id: int) -> Response:
 def archive() -> str:
     _refresh_overdue_contracts()
     status = request.args.get("status", "")
-    branch_id = request.args.get("branch_id", type=int)
+    branch_id, showing_all_branches = _branch_id_from_args()
     q = request.args.get("q", "").strip()
     params: list = []
     clauses: list[str] = []
@@ -465,20 +541,21 @@ def archive() -> str:
         """,
         tuple(params),
     )
-    branches = query_all("SELECT * FROM branches ORDER BY id")
+    branches = _branch_options()
     return render_template(
         "archive.html",
         contracts=contracts,
         branches=branches,
         selected_status=status,
         selected_branch_id=branch_id,
+        showing_all_branches=showing_all_branches,
         q=q,
     )
 
 
 @bp.route("/accounting")
 def accounting() -> str:
-    branch_id = request.args.get("branch_id", type=int)
+    branch_id, showing_all_branches = _branch_id_from_args()
     params: list[int] = []
     branch_clause = ""
     if branch_id:
@@ -497,19 +574,17 @@ def accounting() -> str:
         """,
         tuple(params),
     )
-    branches = query_all("SELECT * FROM branches ORDER BY id")
+    branches = _branch_options()
     return render_template(
         "accounting.html",
         contracts=contracts,
         branches=branches,
         selected_branch_id=branch_id,
+        showing_all_branches=showing_all_branches,
     )
 
 
-@bp.route("/accounting/export.csv")
-def accounting_export() -> Response:
-    include_sent = request.args.get("include_sent") == "1"
-    branch_id = request.args.get("branch_id", type=int)
+def _accounting_rows(*, branch_id: int | None, include_sent: bool) -> list[dict]:
     clauses = [
         "contracts.status IN ('settled', 'accounted')" if include_sent else "contracts.status = 'settled'"
     ]
@@ -518,7 +593,7 @@ def accounting_export() -> Response:
         clauses.append("contracts.branch_id = ?")
         params.append(branch_id)
     where = " AND ".join(clauses)
-    rows = query_all(
+    return query_all(
         f"""
         SELECT contracts.*, clients.first_name, clients.last_name, clients.pesel, branches.city AS branch_city
         FROM contracts
@@ -529,6 +604,9 @@ def accounting_export() -> Response:
         """,
         tuple(params),
     )
+
+
+def _accounting_csv(rows: list[dict]) -> str:
     output = io.StringIO()
     writer = csv.writer(output, delimiter=";")
     writer.writerow(
@@ -560,11 +638,46 @@ def accounting_export() -> Response:
                 row["status"],
             ]
         )
-    csv_data = "\ufeff" + output.getvalue()
+    return "\ufeff" + output.getvalue()
+
+
+def _contract_file_stem(contract_number: str) -> str:
+    return "umowa_" + contract_number.replace("/", "_").replace(" ", "_")
+
+
+@bp.route("/accounting/export.csv")
+def accounting_export() -> Response:
+    include_sent = request.args.get("include_sent") == "1"
+    branch_id, _ = _branch_id_from_args()
+    csv_data = _accounting_csv(_accounting_rows(branch_id=branch_id, include_sent=include_sent))
     return Response(
         csv_data,
         mimetype="text/csv; charset=utf-8",
         headers={"Content-Disposition": "attachment; filename=ewidencja_ksiegowa.csv"},
+    )
+
+
+@bp.route("/accounting/package.zip")
+def accounting_package() -> Response:
+    include_sent = request.args.get("include_sent") == "1"
+    branch_id, _ = _branch_id_from_args()
+    rows = _accounting_rows(branch_id=branch_id, include_sent=include_sent)
+
+    archive_buffer = io.BytesIO()
+    with zipfile.ZipFile(archive_buffer, mode="w", compression=zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr("ewidencja_ksiegowa.csv", _accounting_csv(rows).encode("utf-8"))
+        for row in rows:
+            contract = _contract_or_404(row["id"])
+            photos = _photo_rows(row["id"])
+            pdf = build_contract_pdf(contract, photos, Path(current_app.config["UPLOAD_FOLDER"]))
+            archive.writestr(f"umowy/{_contract_file_stem(contract['contract_number'])}.pdf", pdf.getvalue())
+
+    archive_buffer.seek(0)
+    return send_file(
+        archive_buffer,
+        mimetype="application/zip",
+        as_attachment=True,
+        download_name="paczka_ksiegowa.zip",
     )
 
 

@@ -8,14 +8,16 @@
       <p class="muted">Po spłacie umowy wyeksportuj CSV i oznacz wysłane pozycje jako zaksięgowane.</p>
     </div>
     <div class="actions">
-      <a class="button primary" href="{{ url_for('lombard.accounting_export', branch_id=selected_branch_id) if selected_branch_id else url_for('lombard.accounting_export') }}">Eksport CSV do wysłania</a>
-      <a class="button" href="{{ url_for('lombard.accounting_export', include_sent=1, branch_id=selected_branch_id) if selected_branch_id else url_for('lombard.accounting_export', include_sent=1) }}">Eksport CSV wszystko</a>
+      {% set branch_export = selected_branch_id if selected_branch_id else ('all' if showing_all_branches else none) %}
+      <a class="button primary" href="{{ url_for('lombard.accounting_export', branch_id=branch_export) if branch_export else url_for('lombard.accounting_export') }}">Eksport CSV do wysłania</a>
+      <a class="button" href="{{ url_for('lombard.accounting_package', branch_id=branch_export) if branch_export else url_for('lombard.accounting_package') }}">Paczka ZIP dla księgowej</a>
+      <a class="button" href="{{ url_for('lombard.accounting_export', include_sent=1, branch_id=branch_export) if branch_export else url_for('lombard.accounting_export', include_sent=1) }}">Eksport CSV wszystko</a>
     </div>
   </div>
 
   <form method="get" class="filters">
     <select name="branch_id">
-      <option value="">Wszystkie punkty</option>
+      <option value="all" {% if not selected_branch_id %}selected{% endif %}>Wszystkie punkty</option>
       {% for branch in branches %}
         <option value="{{ branch.id }}" {% if selected_branch_id == branch.id %}selected{% endif %}>{{ branch.city }}</option>
       {% endfor %}

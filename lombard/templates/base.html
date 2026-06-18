@@ -12,6 +12,21 @@
       <strong>Lombard</strong>
       <span class="muted">Busko-Zdrój · Chmielnik · Pińczów</span>
     </div>
+    <form method="post" action="{{ url_for('lombard.set_branch_context') }}" class="branch-context">
+      <input type="hidden" name="next" value="{{ request.full_path if request.query_string else request.path }}">
+      <label>
+        Aktywny punkt
+        <select name="branch_id" onchange="this.form.submit()">
+          <option value="" {% if not current_branch_id %}selected{% endif %}>Wszystkie punkty</option>
+          {% for branch in branch_options %}
+            <option value="{{ branch.id }}" {% if current_branch_id == branch.id %}selected{% endif %}>
+              {{ branch.city }}
+            </option>
+          {% endfor %}
+        </select>
+      </label>
+      <noscript><button>Ustaw</button></noscript>
+    </form>
     <nav>
       <a href="{{ url_for('lombard.dashboard') }}">Panel</a>
       <a href="{{ url_for('lombard.clients') }}">Klienci</a>

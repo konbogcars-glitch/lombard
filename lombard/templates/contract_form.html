@@ -20,7 +20,9 @@
     <label>Punkt
       <select name="branch_id" required>
         {% for branch in branches %}
-          <option value="{{ branch.id }}">{{ branch.city }} — {{ branch.address }}</option>
+          <option value="{{ branch.id }}" {% if selected_branch_id == branch.id %}selected{% endif %}>
+            {{ branch.city }} — {{ branch.address }}
+          </option>
         {% endfor %}
       </select>
     </label>
