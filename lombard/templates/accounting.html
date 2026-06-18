@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+{% block title %}Ewidencja dla księgowej{% endblock %}
+{% block content %}
+<section class="panel">
+  <div class="panel-heading">
+    <div>
+      <h1>Ewidencja dla księgowej</h1>
+      <p class="muted">Po spłacie umowy oznacz ją jako wysłaną do księgowej.</p>
+    </div>
+    <div class="actions">
+      <a class="button primary" href="{{ url_for('lombard.accounting_export') }}">Eksport CSV do wysłania</a>
+      <a class="button" href="{{ url_for('lombard.accounting_export', include_sent=1) }}">Eksport CSV wszystko</a>
+    </div>
+  </div>
+
+  {% if contracts %}
+    <table>
+      <thead>
+        <tr>
+          <th>Nr</th>
+          <th>Klient</th>
+          <th>Punkt</th>
+          <th>Spłata</th>
+          <th>Kwota</th>
+          <th>Status</th>
+          <th>Księgowa</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for contract in contracts %}
+          <tr>
+            <td>{{ contract.contract_number }}</td>
+            <td>{{ contract.first_name }} {{ contract.last_name }}</td>
+            <td>{{ contract.branch_city }}</td>
+            <td>{{ contract.payment_date|date_pl }}</td>
+            <td>{{ contract.paid_amount_cents|money }}</td>
+            <td><span class="status">{{ contract.status|status_label }}</span></td>
+            <td>{{ contract.accountant_sent_at or "do wysłania" }}</td>
+            <td>
+              <a href="{{ url_for('lombard.contract_detail', contract_id=contract.id) }}">Otwórz</a>
+              {% if contract.status == "settled" %}
+                <form method="post" action="{{ url_for('lombard.contract_account', contract_id=contract.id) }}" class="table-form">
+                  <button class="link-button">Oznacz wysłaną</button>
+                </form>
+              {% endif %}
+            </td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  {% else %}
+    <p class="empty">Brak spłaconych umów do księgowania.</p>
+  {% endif %}
+</section>
+{% endblock %}
