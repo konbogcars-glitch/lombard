@@ -51,6 +51,54 @@
     </div>
   </section>
 
+  {% if accounting_batches %}
+    <section class="batch-panel">
+      <div>
+        <h2>Archiwum wysyłek do księgowej</h2>
+        <p class="muted">Każde oznaczenie jako wysłane tworzy paczkę, którą można pobrać ponownie jako dokładny CSV albo ZIP.</p>
+      </div>
+      <table>
+        <thead>
+          <tr>
+            <th>Paczka</th>
+            <th>Data</th>
+            <th>Punkt</th>
+            <th>Okres</th>
+            <th>Umowy</th>
+            <th>Księgowa</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for batch in accounting_batches %}
+            <tr>
+              <td>#{{ batch.id }}</td>
+              <td>{{ batch.created_at }}</td>
+              <td>{{ batch.branch_city or "wszystkie punkty" }}</td>
+              <td>
+                {% if batch.date_from and batch.date_to %}
+                  {{ batch.date_from|date_pl }} - {{ batch.date_to|date_pl }}
+                {% elif batch.date_from %}
+                  od {{ batch.date_from|date_pl }}
+                {% elif batch.date_to %}
+                  do {{ batch.date_to|date_pl }}
+                {% else %}
+                  wszystkie rozliczenia
+                {% endif %}
+              </td>
+              <td>{{ batch.contracts_count }}</td>
+              <td>{{ batch.accountant_email or "nie zapisano" }}</td>
+              <td>
+                <a href="{{ url_for('lombard.accounting_batch_export', batch_id=batch.id) }}">CSV</a>
+                <a href="{{ url_for('lombard.accounting_batch_package', batch_id=batch.id) }}">ZIP</a>
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </section>
+  {% endif %}
+
   {% if contracts %}
     <form method="post" action="{{ url_for('lombard.accounting_bulk_account') }}" class="bulk-accounting">
       {% if selected_branch_id %}

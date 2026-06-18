@@ -358,6 +358,20 @@ button:hover {
   margin: 0;
 }
 
+.batch-panel {
+  background: #fffdf5;
+  border: 1px solid #f2d98d;
+  border-radius: 12px;
+  display: grid;
+  gap: 12px;
+  margin: 14px 0;
+  padding: 14px;
+}
+
+.batch-panel h2 {
+  margin-bottom: 4px;
+}
+
 .details {
   display: grid;
   grid-template-columns: 190px minmax(0, 1fr);

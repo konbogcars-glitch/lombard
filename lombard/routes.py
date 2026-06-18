@@ -170,6 +170,37 @@ def _accounting_filter_url_args(
     return args
 
 
+def _create_accounting_batch(
+    *,
+    db,
+    branch_id: int | None,
+    date_from: str = "",
+    date_to: str = "",
+    contracts_count: int,
+    note: str = "",
+) -> int:
+    settings = _accountant_settings()
+    cursor = db.execute(
+        """
+        INSERT INTO accounting_batches(
+            branch_id, date_from, date_to, contracts_count,
+            accountant_email, accountant_name, note
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            branch_id,
+            date_from,
+            date_to,
+            contracts_count,
+            settings["email"],
+            settings["name"],
+            note,
+        ),
+    )
+    return int(cursor.lastrowid)
+
+
 def _accounting_mailto_url(
     settings: dict,
     *,
@@ -787,21 +818,36 @@ def contract_account(contract_id: int) -> Response:
         flash("Do księgowości można przekazać tylko spłaconą albo zrealizowaną umowę.", "warning")
         return redirect(url_for("lombard.contract_detail", contract_id=contract_id))
 
+    db = get_db()
     now = datetime.now().isoformat(timespec="seconds")
-    get_db().execute(
+    realization_date = contract["realization_date"] or contract["payment_date"] or ""
+    accounting_note = request.form.get("accounting_note", "").strip()
+    batch_id = _create_accounting_batch(
+        db=db,
+        branch_id=contract["branch_id"],
+        date_from=realization_date,
+        date_to=realization_date,
+        contracts_count=1,
+        note=accounting_note,
+    )
+    db.execute(
         """
         UPDATE contracts
         SET status = 'accounted',
             accounted_at = COALESCE(accounted_at, ?),
             accountant_sent_at = ?,
             accounting_note = ?,
+            accounting_batch_id = ?,
             updated_at = CURRENT_TIMESTAMP
         WHERE id = ?
         """,
-        (now, now, request.form.get("accounting_note", "").strip(), contract_id),
+        (now, now, accounting_note, batch_id, contract_id),
     )
-    get_db().commit()
-    flash("Umowa została oznaczona jako zaksięgowana/wysłana do księgowej.", "success")
+    db.commit()
+    flash(
+        f"Umowa została oznaczona jako zaksięgowana/wysłana do księgowej w paczce #{batch_id}.",
+        "success",
+    )
     return redirect(url_for("lombard.accounting"))
 
 
@@ -851,6 +897,7 @@ def contract_template_settings() -> str | Response:
 
 @bp.route("/accounting/bulk-account", methods=["POST"])
 def accounting_bulk_account() -> Response:
+    db = get_db()
     raw_branch_id = request.form.get("branch_id", "").strip()
     showing_all_branches = raw_branch_id == "all"
     branch_id = int(raw_branch_id) if raw_branch_id and not showing_all_branches else None
@@ -859,7 +906,7 @@ def accounting_bulk_account() -> Response:
     accounting_note = request.form.get("accounting_note", "").strip()
     now = datetime.now().isoformat(timespec="seconds")
 
-    params: list[int | str] = [now, now, accounting_note]
+    params: list[int | str] = []
     clauses = ["status IN ('settled', 'sold')"]
     if branch_id:
         clauses.append("branch_id = ?")
@@ -872,24 +919,45 @@ def accounting_bulk_account() -> Response:
         params.append(date_to)
     where = " AND ".join(clauses)
 
-    cursor = get_db().execute(
-        f"""
-        UPDATE contracts
-        SET status = 'accounted',
-            accounted_at = COALESCE(accounted_at, ?),
-            accountant_sent_at = ?,
-            accounting_note = ?,
-            updated_at = CURRENT_TIMESTAMP
-        WHERE {where}
-        """,
+    contracts_to_account = db.execute(
+        f"SELECT id FROM contracts WHERE {where} ORDER BY id",
         tuple(params),
-    )
-    get_db().commit()
+    ).fetchall()
+    contract_ids = [row["id"] for row in contracts_to_account]
 
-    if cursor.rowcount:
-        flash(f"Oznaczono jako wysłane do księgowej: {cursor.rowcount}.", "success")
+    if contract_ids:
+        batch_id = _create_accounting_batch(
+            db=db,
+            branch_id=branch_id,
+            date_from=date_from,
+            date_to=date_to,
+            contracts_count=len(contract_ids),
+            note=accounting_note,
+        )
+        placeholders = ", ".join("?" for _ in contract_ids)
+        update_params: list[int | str] = [now, now, accounting_note, batch_id, *contract_ids]
+        cursor = db.execute(
+            f"""
+            UPDATE contracts
+            SET status = 'accounted',
+                accounted_at = COALESCE(accounted_at, ?),
+                accountant_sent_at = ?,
+                accounting_note = ?,
+                accounting_batch_id = ?,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id IN ({placeholders})
+            """,
+            tuple(update_params),
+        )
+        db.commit()
+        flash(
+            f"Oznaczono jako wysłane do księgowej: {cursor.rowcount}. Utworzono paczkę #{batch_id}.",
+            "success",
+        )
     else:
+        db.commit()
         flash("Brak spłaconych lub zrealizowanych umów do oznaczenia dla wybranego filtra.", "warning")
+
     redirect_args = _accounting_filter_url_args(
         branch_id=branch_id,
         showing_all_branches=showing_all_branches,
@@ -985,6 +1053,7 @@ def accounting() -> str:
     return render_template(
         "accounting.html",
         contracts=contracts,
+        accounting_batches=_accounting_batch_rows(),
         branches=branches,
         selected_branch_id=branch_id,
         showing_all_branches=showing_all_branches,
@@ -1001,6 +1070,34 @@ def accounting() -> str:
         accounting_package_url=url_for("lombard.accounting_package", **export_args),
         accounting_export_all_url=url_for("lombard.accounting_export", **export_all_args),
     )
+
+
+def _accounting_batch_rows(limit: int = 8) -> list[dict]:
+    return query_all(
+        """
+        SELECT accounting_batches.*, branches.city AS branch_city
+        FROM accounting_batches
+        LEFT JOIN branches ON branches.id = accounting_batches.branch_id
+        ORDER BY accounting_batches.created_at DESC, accounting_batches.id DESC
+        LIMIT ?
+        """,
+        (limit,),
+    )
+
+
+def _accounting_batch_or_404(batch_id: int) -> dict:
+    batch = query_one(
+        """
+        SELECT accounting_batches.*, branches.city AS branch_city
+        FROM accounting_batches
+        LEFT JOIN branches ON branches.id = accounting_batches.branch_id
+        WHERE accounting_batches.id = ?
+        """,
+        (batch_id,),
+    )
+    if batch is None:
+        abort(404)
+    return batch
 
 
 def _accounting_rows(
@@ -1036,6 +1133,20 @@ def _accounting_rows(
         ORDER BY COALESCE(contracts.payment_date, contracts.realization_date) DESC, contracts.id DESC
         """,
         tuple(params),
+    )
+
+
+def _accounting_rows_for_batch(batch_id: int) -> list[dict]:
+    return query_all(
+        """
+        SELECT contracts.*, clients.first_name, clients.last_name, clients.pesel, branches.city AS branch_city
+        FROM contracts
+        JOIN clients ON clients.id = contracts.client_id
+        JOIN branches ON branches.id = contracts.branch_id
+        WHERE contracts.accounting_batch_id = ?
+        ORDER BY COALESCE(contracts.payment_date, contracts.realization_date) DESC, contracts.id DESC
+        """,
+        (batch_id,),
     )
 
 
@@ -1112,19 +1223,7 @@ def accounting_export() -> Response:
     )
 
 
-@bp.route("/accounting/package.zip")
-def accounting_package() -> Response:
-    include_sent = request.args.get("include_sent") == "1"
-    branch_id, _ = _branch_id_from_args()
-    date_from = _date_filter_from_args("date_from", "data od")
-    date_to = _date_filter_from_args("date_to", "data do")
-    rows = _accounting_rows(
-        branch_id=branch_id,
-        include_sent=include_sent,
-        date_from=date_from,
-        date_to=date_to,
-    )
-
+def _accounting_package_response(rows: list[dict], *, download_name: str) -> Response:
     archive_buffer = io.BytesIO()
     with zipfile.ZipFile(archive_buffer, mode="w", compression=zipfile.ZIP_DEFLATED) as archive:
         archive.writestr("ewidencja_ksiegowa.csv", _accounting_csv(rows).encode("utf-8"))
@@ -1144,7 +1243,44 @@ def accounting_package() -> Response:
         archive_buffer,
         mimetype="application/zip",
         as_attachment=True,
-        download_name="paczka_ksiegowa.zip",
+        download_name=download_name,
+    )
+
+
+@bp.route("/accounting/package.zip")
+def accounting_package() -> Response:
+    include_sent = request.args.get("include_sent") == "1"
+    branch_id, _ = _branch_id_from_args()
+    date_from = _date_filter_from_args("date_from", "data od")
+    date_to = _date_filter_from_args("date_to", "data do")
+    rows = _accounting_rows(
+        branch_id=branch_id,
+        include_sent=include_sent,
+        date_from=date_from,
+        date_to=date_to,
+    )
+    return _accounting_package_response(rows, download_name="paczka_ksiegowa.zip")
+
+
+@bp.route("/accounting/batches/<int:batch_id>/export.csv")
+def accounting_batch_export(batch_id: int) -> Response:
+    _accounting_batch_or_404(batch_id)
+    csv_data = _accounting_csv(_accounting_rows_for_batch(batch_id))
+    return Response(
+        csv_data,
+        mimetype="text/csv; charset=utf-8",
+        headers={
+            "Content-Disposition": f"attachment; filename=ewidencja_ksiegowa_paczka_{batch_id}.csv"
+        },
+    )
+
+
+@bp.route("/accounting/batches/<int:batch_id>/package.zip")
+def accounting_batch_package(batch_id: int) -> Response:
+    _accounting_batch_or_404(batch_id)
+    return _accounting_package_response(
+        _accounting_rows_for_batch(batch_id),
+        download_name=f"paczka_ksiegowa_{batch_id}.zip",
     )
 
 

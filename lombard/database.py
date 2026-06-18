@@ -36,6 +36,18 @@ CREATE TABLE IF NOT EXISTS clients (
 CREATE INDEX IF NOT EXISTS idx_clients_name ON clients(last_name, first_name);
 CREATE INDEX IF NOT EXISTS idx_clients_pesel ON clients(pesel);
 
+CREATE TABLE IF NOT EXISTS accounting_batches (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    branch_id INTEGER REFERENCES branches(id),
+    date_from TEXT,
+    date_to TEXT,
+    contracts_count INTEGER NOT NULL DEFAULT 0,
+    accountant_email TEXT,
+    accountant_name TEXT,
+    note TEXT,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
 CREATE TABLE IF NOT EXISTS contracts (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     contract_number TEXT NOT NULL UNIQUE,
@@ -67,6 +79,7 @@ CREATE TABLE IF NOT EXISTS contracts (
     accounted_at TEXT,
     accountant_sent_at TEXT,
     accounting_note TEXT,
+    accounting_batch_id INTEGER REFERENCES accounting_batches(id),
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
@@ -107,6 +120,7 @@ CONTRACT_COLUMN_MIGRATIONS = {
     "surplus_return_cents": "INTEGER",
     "shortfall_cents": "INTEGER",
     "realization_note": "TEXT",
+    "accounting_batch_id": "INTEGER",
 }
 
 
@@ -135,6 +149,9 @@ def init_db() -> None:
     db = get_db()
     db.executescript(SCHEMA)
     _ensure_contract_columns(db)
+    db.execute(
+        "CREATE INDEX IF NOT EXISTS idx_contracts_accounting_batch ON contracts(accounting_batch_id)"
+    )
     db.executemany(
         """
         INSERT INTO branches(code, name, city, address)

@@ -12,6 +12,7 @@ Pierwsza wersja aplikacji webowej do obsługi lombardu:
 - zapis kontaktu do księgowej i przygotowanie gotowego e-maila z opisem paczki do wysłania,
 - wybór aktywnego punktu pracy w nagłówku, z możliwością przełączenia na wspólny widok wszystkich lokalizacji,
 - paczka ZIP dla księgowej zawierająca ewidencję CSV oraz PDF-y spłaconych umów gotowe do wysłania,
+- archiwum paczek księgowych pozwalające ponownie pobrać dokładny CSV/ZIP wysłany do księgowej,
 - automatyczne oznaczanie umów po terminie oraz blokady ponownego księgowania.
 
 ## Uruchomienie

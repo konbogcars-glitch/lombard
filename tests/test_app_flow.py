@@ -660,6 +660,78 @@ class AppFlowTest(unittest.TestCase):
         )
         self.assertEqual(by_number[chm_contract["contract_number"]]["status"], "settled")
 
+    def test_bulk_accounting_creates_reusable_accounting_batch_package(self):
+        first_client = self._create_client(first_name="Anna", pesel="83010112345")
+        second_client = self._create_client(first_name="Ewa", pesel="84010112345")
+        first_contract = self._create_contract(
+            client_id=first_client,
+            issue_date="2026-08-01",
+        )
+        second_contract = self._create_contract(
+            client_id=second_client,
+            issue_date="2026-08-02",
+        )
+
+        for contract in (first_contract, second_contract):
+            response = self.client.post(
+                f"/contracts/{contract['id']}/settle",
+                data={"payment_date": "2026-08-07", "paid_amount": ""},
+                follow_redirects=True,
+            )
+            self.assertEqual(response.status_code, 200)
+
+        response = self.client.post(
+            "/accounting/bulk-account",
+            data={"accounting_note": "wyslano zbiorczo za sierpien"},
+            follow_redirects=True,
+        )
+        self.assertEqual(response.status_code, 200)
+        page = response.get_data(as_text=True)
+        self.assertIn("Archiwum wysyłek do księgowej", page)
+        self.assertIn("#1", page)
+
+        with self.app.app_context():
+            db = get_db()
+            rows = db.execute(
+                """
+                SELECT contract_number, status, accounting_note, accounting_batch_id
+                FROM contracts
+                WHERE id IN (?, ?)
+                ORDER BY contract_number
+                """,
+                (first_contract["id"], second_contract["id"]),
+            ).fetchall()
+            batch_ids = {row["accounting_batch_id"] for row in rows}
+            self.assertEqual(len(batch_ids), 1)
+            batch_id = batch_ids.pop()
+            batch = db.execute(
+                "SELECT contracts_count, note FROM accounting_batches WHERE id = ?",
+                (batch_id,),
+            ).fetchone()
+            self.assertEqual(batch["contracts_count"], 2)
+            self.assertEqual(batch["note"], "wyslano zbiorczo za sierpien")
+            for row in rows:
+                self.assertEqual(row["status"], "accounted")
+                self.assertEqual(row["accounting_note"], "wyslano zbiorczo za sierpien")
+
+        default_csv = self.client.get("/accounting/export.csv").get_data(as_text=True)
+        self.assertNotIn(first_contract["contract_number"], default_csv)
+
+        batch_csv = self.client.get(f"/accounting/batches/{batch_id}/export.csv")
+        self.assertEqual(batch_csv.status_code, 200)
+        batch_csv_data = batch_csv.get_data(as_text=True)
+        self.assertIn(first_contract["contract_number"], batch_csv_data)
+        self.assertIn(second_contract["contract_number"], batch_csv_data)
+        self.assertIn("wyslano zbiorczo za sierpien", batch_csv_data)
+
+        package_response = self.client.get(f"/accounting/batches/{batch_id}/package.zip")
+        self.assertEqual(package_response.status_code, 200)
+        with zipfile.ZipFile(io.BytesIO(package_response.get_data())) as archive:
+            names = archive.namelist()
+            self.assertIn("ewidencja_ksiegowa.csv", names)
+            self.assertIn("umowy/umowa_BUS_2026_0001.pdf", names)
+            self.assertIn("umowy/umowa_BUS_2026_0002.pdf", names)
+
     def test_branch_context_filters_dashboard_and_preselects_contract_branch(self):
         bus_contract = self._create_contract(branch_code="BUS", issue_date="2026-12-01")
         chm_client = self._create_client(first_name="Ewa", pesel="82010112345")
