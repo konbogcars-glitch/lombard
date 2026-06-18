@@ -34,13 +34,18 @@ from .calculations import (
     repayment_amount_on,
 )
 from .database import get_db, next_contract_number, query_all, query_one
-from .pdf import build_contract_pdf
+from .pdf import (
+    CONTRACT_TEMPLATE_PLACEHOLDERS,
+    DEFAULT_CONTRACT_TEMPLATE,
+    build_contract_pdf,
+)
 
 
 bp = Blueprint("lombard", __name__)
 ALLOWED_EXTENSIONS = {"jpg", "jpeg", "png", "webp"}
 ACCOUNTANT_EMAIL_KEY = "accountant_email"
 ACCOUNTANT_NAME_KEY = "accountant_name"
+CONTRACT_TEMPLATE_KEY = "contract_template_text"
 
 
 def _today() -> date:
@@ -78,6 +83,10 @@ def _accountant_settings() -> dict:
         "email": _get_setting(ACCOUNTANT_EMAIL_KEY),
         "name": _get_setting(ACCOUNTANT_NAME_KEY),
     }
+
+
+def _contract_template_text() -> str:
+    return _get_setting(CONTRACT_TEMPLATE_KEY) or DEFAULT_CONTRACT_TEMPLATE
 
 
 def _current_branch_id() -> int | None:
@@ -676,6 +685,32 @@ def accounting_settings() -> Response:
     return redirect(_safe_redirect_target(request.form.get("next")))
 
 
+@bp.route("/contract-template", methods=["GET", "POST"])
+def contract_template_settings() -> str | Response:
+    db = get_db()
+    if request.method == "POST":
+        template_text = ""
+        if request.form.get("reset_template") != "1":
+            template_text = request.form.get("contract_template", "").strip()
+        _save_setting(db=db, key=CONTRACT_TEMPLATE_KEY, value=template_text)
+        db.commit()
+        message = (
+            "Przywrócono domyślny szablon umowy."
+            if not template_text
+            else "Zapisano szablon umowy do generowania PDF."
+        )
+        flash(message, "success")
+        return redirect(url_for("lombard.contract_template_settings"))
+
+    stored_template = _get_setting(CONTRACT_TEMPLATE_KEY)
+    return render_template(
+        "contract_template.html",
+        template_text=stored_template or DEFAULT_CONTRACT_TEMPLATE,
+        using_default=not bool(stored_template),
+        placeholders=CONTRACT_TEMPLATE_PLACEHOLDERS,
+    )
+
+
 @bp.route("/accounting/bulk-account", methods=["POST"])
 def accounting_bulk_account() -> Response:
     branch_id = request.form.get("branch_id", type=int)
@@ -714,7 +749,12 @@ def accounting_bulk_account() -> Response:
 def contract_pdf(contract_id: int) -> Response:
     contract = _contract_or_404(contract_id)
     photos = _photo_rows(contract_id)
-    pdf = build_contract_pdf(contract, photos, Path(current_app.config["UPLOAD_FOLDER"]))
+    pdf = build_contract_pdf(
+        contract,
+        photos,
+        Path(current_app.config["UPLOAD_FOLDER"]),
+        template_text=_contract_template_text(),
+    )
     filename = f"umowa_{contract['contract_number'].replace('/', '_')}.pdf"
     return send_file(pdf, mimetype="application/pdf", as_attachment=True, download_name=filename)
 
@@ -896,7 +936,12 @@ def accounting_package() -> Response:
         for row in rows:
             contract = _contract_or_404(row["id"])
             photos = _photo_rows(row["id"])
-            pdf = build_contract_pdf(contract, photos, Path(current_app.config["UPLOAD_FOLDER"]))
+            pdf = build_contract_pdf(
+                contract,
+                photos,
+                Path(current_app.config["UPLOAD_FOLDER"]),
+                template_text=_contract_template_text(),
+            )
             archive.writestr(f"umowy/{_contract_file_stem(contract['contract_number'])}.pdf", pdf.getvalue())
 
     archive_buffer.seek(0)

@@ -260,6 +260,30 @@ button:hover {
   padding: 14px;
 }
 
+.template-editor textarea {
+  font-family: "Courier New", Courier, monospace;
+  line-height: 1.45;
+}
+
+.placeholder-list {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+}
+
+.placeholder-list div {
+  background: #f8fbff;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 10px;
+}
+
+.placeholder-list code {
+  display: block;
+  font-weight: 700;
+  margin-bottom: 4px;
+}
+
 .client-choice {
   display: grid;
   gap: 12px;

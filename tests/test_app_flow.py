@@ -538,6 +538,46 @@ class AppFlowTest(unittest.TestCase):
             self.assertEqual(settings["accountant_email"], "ksiegowa@example.com")
             self.assertEqual(settings["accountant_name"], "Pani Anno")
 
+    def test_contract_template_can_be_saved_and_used_for_pdf_package(self):
+        page_response = self.client.get("/contract-template")
+        self.assertEqual(page_response.status_code, 200)
+        self.assertIn("{client_name}", page_response.get_data(as_text=True))
+
+        contract = self._create_contract(issue_date="2026-07-01")
+        response = self.client.post(
+            "/contract-template",
+            data={
+                "contract_template": (
+                    "Własny wzór umowy {contract_number}\n"
+                    "Klient: {client_name}\n"
+                    "Do spłaty: {total_repayment}"
+                )
+            },
+            follow_redirects=True,
+        )
+        self.assertEqual(response.status_code, 200)
+        page = response.get_data(as_text=True)
+        self.assertIn("Własny wzór umowy {contract_number}", page)
+
+        pdf_response = self.client.get(f"/contracts/{contract['id']}/pdf")
+        self.assertEqual(pdf_response.status_code, 200)
+        self.assertEqual(pdf_response.mimetype, "application/pdf")
+
+        settle_response = self.client.post(
+            f"/contracts/{contract['id']}/settle",
+            data={"payment_date": "2026-07-07", "paid_amount": ""},
+            follow_redirects=True,
+        )
+        self.assertEqual(settle_response.status_code, 200)
+        package_response = self.client.get("/accounting/package.zip")
+        self.assertEqual(package_response.status_code, 200)
+
+        with self.app.app_context():
+            template = get_db().execute(
+                "SELECT value FROM settings WHERE key = 'contract_template_text'",
+            ).fetchone()
+            self.assertIn("Własny wzór", template["value"])
+
     def test_sold_contract_enters_accounting_register(self):
         contract = self._create_contract(issue_date="2026-01-01", term_days="1")
 

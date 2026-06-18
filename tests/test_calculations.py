@@ -8,6 +8,7 @@ from lombard.calculations import (
     money_to_words,
     repayment_amount_on,
 )
+from lombard.pdf import render_contract_template
 
 
 class LoanCalculationTest(unittest.TestCase):
@@ -80,6 +81,45 @@ class LoanCalculationTest(unittest.TestCase):
         self.assertEqual(result.surplus_fee_cents, 0)
         self.assertEqual(result.surplus_return_cents, 0)
         self.assertEqual(result.shortfall_cents, 23_000)
+
+    def test_contract_template_replaces_known_placeholders(self):
+        contract = {
+            "contract_number": "BUS/2026/0001",
+            "branch_city": "Busko-Zdrój",
+            "branch_address": "ul. Wojska Polskiego 3",
+            "issue_date": "2026-01-01",
+            "first_name": "Jan",
+            "last_name": "Kowalski",
+            "street_address": "ul. Testowa 1",
+            "postal_code": "28-100",
+            "client_city": "Busko-Zdrój",
+            "pesel": "90010112345",
+            "document_type": "Dowód Osobisty",
+            "document_number": "ABC123456",
+            "loan_amount_cents": 200_000,
+            "commission_amount_cents": 20_000,
+            "total_repayment_cents": 220_000,
+            "term_days": 7,
+            "due_date": "2026-01-07",
+            "additional_period_end": "2026-02-06",
+            "daily_increase_cents": 2_200,
+            "max_additional_fee_cents": 44_000,
+            "collateral_type": "rzecz ruchoma",
+            "collateral_description": "Telefon testowy",
+            "collateral_value_cents": 300_000,
+            "valuation_basis": "oględziny",
+            "sale_mode": "auction",
+        }
+
+        rendered = render_contract_template(
+            contract,
+            "Umowa {contract_number}: {client_name}, spłata {total_repayment}, {missing_field}",
+        )
+
+        self.assertIn("BUS/2026/0001", rendered)
+        self.assertIn("Jan Kowalski", rendered)
+        self.assertIn("2 200,00 zł", rendered)
+        self.assertIn("{missing_field}", rendered)
 
 
 if __name__ == "__main__":
