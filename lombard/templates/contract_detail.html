@@ -1,0 +1,91 @@
+{% extends "base.html" %}
+{% block title %}Umowa {{ contract.contract_number }}{% endblock %}
+{% block content %}
+<section class="hero">
+  <div>
+    <h1>Umowa {{ contract.contract_number }}</h1>
+    <p>{{ contract.first_name }} {{ contract.last_name }} · {{ contract.branch_city }} · status: {{ contract.status|status_label }}</p>
+  </div>
+  <div class="actions">
+    <a class="button primary" href="{{ url_for('lombard.contract_pdf', contract_id=contract.id) }}">Pobierz PDF</a>
+    <a class="button" href="{{ url_for('lombard.client_detail', client_id=contract.client_id) }}">Kartoteka klienta</a>
+  </div>
+</section>
+
+<section class="cards">
+  <article class="card"><span class="label">Kwota pożyczki</span><strong>{{ contract.loan_amount_cents|money }}</strong></article>
+  <article class="card"><span class="label">Prowizja</span><strong>{{ contract.commission_amount_cents|money }}</strong></article>
+  <article class="card"><span class="label">Do spłaty</span><strong>{{ contract.total_repayment_cents|money }}</strong></article>
+  <article class="card"><span class="label">Termin</span><strong>{{ contract.due_date|date_pl }}</strong></article>
+</section>
+
+<section class="split">
+  <div class="panel">
+    <h2>Dane umowy</h2>
+    <dl class="details">
+      <dt>Klient</dt><dd>{{ contract.first_name }} {{ contract.last_name }}</dd>
+      <dt>Adres</dt><dd>{{ contract.street_address }}, {{ contract.postal_code }} {{ contract.client_city }}</dd>
+      <dt>PESEL</dt><dd>{{ contract.pesel or "-" }}</dd>
+      <dt>Dokument</dt><dd>{{ contract.document_type }} {{ contract.document_number or "" }}</dd>
+      <dt>Punkt</dt><dd>{{ contract.branch_city }}, {{ contract.branch_address }}</dd>
+      <dt>Data umowy</dt><dd>{{ contract.issue_date|date_pl }}</dd>
+      <dt>Okres</dt><dd>{{ contract.term_days }} dni</dd>
+      <dt>Dodatkowe 30 dni do</dt><dd>{{ contract.additional_period_end|date_pl }}</dd>
+      <dt>Dziennie po terminie</dt><dd>{{ contract.daily_increase_cents|money }}</dd>
+      <dt>Limit opłat</dt><dd>{{ contract.max_additional_fee_cents|money }}</dd>
+      <dt>Tryb sprzedaży</dt><dd>{{ contract.sale_mode|sale_mode_label }}</dd>
+      <dt>Zabezpieczenie</dt><dd>{{ contract.collateral_type }} — {{ contract.collateral_description }}</dd>
+      <dt>Wartość zabezpieczenia</dt><dd>{{ contract.collateral_value_cents|money }}</dd>
+    </dl>
+  </div>
+
+  <aside class="panel">
+    <h2>Rozliczenie</h2>
+    {% if contract.status in ["active", "expired"] %}
+      <p>Kwota należna na dziś: <strong>{{ expected_payment|money }}</strong></p>
+      <form method="post" action="{{ url_for('lombard.contract_settle', contract_id=contract.id) }}" class="form">
+        <label>Data spłaty <input type="date" name="payment_date" value="{{ today.isoformat() }}" required></label>
+        <label>Kwota spłacona <input name="paid_amount" placeholder="{{ expected_payment|money }}"></label>
+        <button class="button primary">Oznacz jako spłaconą</button>
+      </form>
+    {% else %}
+      <dl class="details">
+        <dt>Data spłaty</dt><dd>{{ contract.payment_date|date_pl }}</dd>
+        <dt>Kwota spłacona</dt><dd>{{ contract.paid_amount_cents|money }}</dd>
+        <dt>Księgowanie</dt><dd>{{ contract.accountant_sent_at or "oczekuje" }}</dd>
+      </dl>
+    {% endif %}
+
+    {% if contract.status == "settled" %}
+      <form method="post" action="{{ url_for('lombard.contract_account', contract_id=contract.id) }}" class="form">
+        <label>Notatka dla księgowej <textarea name="accounting_note" rows="3"></textarea></label>
+        <button class="button">Oznacz jako wysłaną do księgowej</button>
+      </form>
+    {% endif %}
+  </aside>
+</section>
+
+<section class="panel">
+  <div class="panel-heading">
+    <h2>Zdjęcia do umowy</h2>
+  </div>
+  <form method="post" action="{{ url_for('lombard.contract_photos', contract_id=contract.id) }}" enctype="multipart/form-data" class="form inline">
+    <input type="file" name="photos" accept=".jpg,.jpeg,.png,.webp,image/*" multiple required>
+    <input name="caption" placeholder="Opis zdjęć, np. stan przedmiotu">
+    <button class="button">Dodaj zdjęcia</button>
+  </form>
+
+  {% if photos %}
+    <div class="gallery">
+      {% for photo in photos %}
+        <figure>
+          <img src="{{ url_for('lombard.uploaded_photo', contract_id=contract.id, filename=photo.stored_filename) }}" alt="{{ photo.original_filename }}">
+          <figcaption>{{ photo.caption or photo.original_filename }}</figcaption>
+        </figure>
+      {% endfor %}
+    </div>
+  {% else %}
+    <p class="empty">Brak zdjęć. Dodaj zdjęcia zabezpieczenia, aby były dołączone do PDF.</p>
+  {% endif %}
+</section>
+{% endblock %}
