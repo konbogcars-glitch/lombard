@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% block title %}Logowanie do programu{% endblock %}
+{% block content %}
+<section class="auth-panel panel">
+  <div>
+    <h1>Logowanie do programu lombardu</h1>
+    <p class="muted">
+      Zaloguj pracownika, aby uzyskać dostęp do kartoteki klientów, umów,
+      zdjęć i ewidencji księgowej.
+    </p>
+  </div>
+
+  <form method="post" class="form">
+    <input type="hidden" name="next" value="{{ next_url }}">
+    <label>Login
+      <input name="username" autocomplete="username" required autofocus>
+    </label>
+    <label>Hasło
+      <input type="password" name="password" autocomplete="current-password" required>
+    </label>
+    <button class="button primary">Zaloguj</button>
+  </form>
+
+  <aside class="login-help">
+    <h2>Konta startowe</h2>
+    <p class="muted">
+      Po pierwszym uruchomieniu system tworzy konto administratora oraz
+      konta punktów. Hasła można ustawić zmiennymi środowiskowymi przed
+      założeniem bazy: <code>LOMBARD_ADMIN_PASSWORD</code> i
+      <code>LOMBARD_BRANCH_PASSWORD</code>.
+    </p>
+    <ul>
+      <li><strong>admin</strong> / admin123 - pełny dostęp</li>
+      <li><strong>busko</strong>, <strong>chmielnik</strong>, <strong>pinczow</strong> / lombard123 - dostęp punktu</li>
+    </ul>
+  </aside>
+</section>
+{% endblock %}
