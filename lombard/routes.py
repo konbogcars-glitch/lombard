@@ -89,6 +89,10 @@ def _contract_template_text() -> str:
     return _get_setting(CONTRACT_TEMPLATE_KEY) or DEFAULT_CONTRACT_TEMPLATE
 
 
+def _money_input(cents: int | None) -> str:
+    return f"{cents_to_money(cents):.2f}".replace(".", ",")
+
+
 def _current_branch_id() -> int | None:
     branch_id = session.get("branch_context_id")
     if branch_id is None:
@@ -771,6 +775,84 @@ def contract_detail(contract_id: int) -> str:
         photos=photos,
         expected_payment=expected_payment,
         today=_today(),
+    )
+
+
+@bp.route("/contracts/<int:contract_id>/edit", methods=["GET", "POST"])
+def contract_edit(contract_id: int) -> str | Response:
+    _refresh_overdue_contracts()
+    contract = _contract_or_404(contract_id)
+    if contract["status"] not in {"active", "expired"}:
+        flash("Można poprawiać tylko umowy aktywne albo po terminie przed rozliczeniem.", "warning")
+        return redirect(url_for("lombard.contract_detail", contract_id=contract_id))
+
+    issue_date = _parse_date(contract["issue_date"])
+    if request.method == "POST":
+        loan_amount_cents = money_to_cents(request.form["loan_amount"])
+        commission_raw = request.form.get("commission_amount", "").strip()
+        commission_amount_cents = money_to_cents(commission_raw) if commission_raw else None
+        term_days = int(request.form["term_days"])
+        calculation = calculate_loan(
+            issue_date=issue_date,
+            loan_amount_cents=loan_amount_cents,
+            commission_amount_cents=commission_amount_cents,
+            commission_rate_percent=Decimal(request.form.get("commission_rate", "10") or "10"),
+            term_days=term_days,
+        )
+        status = "expired" if calculation.due_date < _today() else "active"
+
+        db = get_db()
+        db.execute(
+            """
+            UPDATE contracts
+            SET term_days = ?,
+                due_date = ?,
+                additional_period_end = ?,
+                loan_amount_cents = ?,
+                commission_amount_cents = ?,
+                total_repayment_cents = ?,
+                daily_increase_cents = ?,
+                max_additional_fee_cents = ?,
+                collateral_type = ?,
+                collateral_description = ?,
+                collateral_value_cents = ?,
+                valuation_basis = ?,
+                sale_mode = ?,
+                status = ?,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+            """,
+            (
+                term_days,
+                calculation.due_date.isoformat(),
+                calculation.additional_period_end.isoformat(),
+                calculation.loan_amount_cents,
+                calculation.commission_amount_cents,
+                calculation.total_repayment_cents,
+                calculation.daily_increase_cents,
+                calculation.max_additional_fee_cents,
+                request.form["collateral_type"].strip(),
+                request.form["collateral_description"].strip(),
+                money_to_cents(request.form["collateral_value"]),
+                request.form.get("valuation_basis", "").strip(),
+                calculation.sale_mode,
+                status,
+                contract_id,
+            ),
+        )
+        db.commit()
+        flash("Zapisano korektę umowy i przeliczono kwoty.", "success")
+        return redirect(url_for("lombard.contract_detail", contract_id=contract_id))
+
+    form_values = {
+        "loan_amount": _money_input(contract["loan_amount_cents"]),
+        "commission_amount": _money_input(contract["commission_amount_cents"]),
+        "collateral_value": _money_input(contract["collateral_value_cents"]),
+    }
+    return render_template(
+        "contract_edit.html",
+        contract=contract,
+        form_values=form_values,
     )
 
 

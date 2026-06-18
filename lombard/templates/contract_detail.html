@@ -8,6 +8,9 @@
   </div>
   <div class="actions">
     <a class="button primary" href="{{ url_for('lombard.contract_pdf', contract_id=contract.id) }}">Pobierz PDF</a>
+    {% if contract.status in ["active", "expired"] %}
+      <a class="button" href="{{ url_for('lombard.contract_edit', contract_id=contract.id) }}">Edytuj umowę</a>
+    {% endif %}
     <a class="button" href="{{ url_for('lombard.client_detail', client_id=contract.client_id) }}">Kartoteka klienta</a>
   </div>
 </section>

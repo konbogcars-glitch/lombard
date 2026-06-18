@@ -319,6 +319,107 @@ class AppFlowTest(unittest.TestCase):
         finally:
             file_response.close()
 
+    def test_active_contract_can_be_edited_and_recalculated(self):
+        contract = self._create_contract(issue_date="2099-01-01")
+
+        edit_page = self.client.get(f"/contracts/{contract['id']}/edit")
+        self.assertEqual(edit_page.status_code, 200)
+        self.assertIn("Korekta umowy", edit_page.get_data(as_text=True))
+
+        response = self.client.post(
+            f"/contracts/{contract['id']}/edit",
+            data={
+                "loan_amount": "3000,00",
+                "commission_amount": "",
+                "commission_rate": "5",
+                "term_days": "10",
+                "collateral_type": "sprzęt elektroniczny",
+                "collateral_description": "Laptop Dell XPS po korekcie opisu",
+                "collateral_value": "4200,00",
+                "valuation_basis": "korekta po sprawdzeniu numeru seryjnego",
+            },
+            follow_redirects=True,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        page = response.get_data(as_text=True)
+        self.assertIn("Zapisano korektę umowy", page)
+        self.assertIn("Laptop Dell XPS po korekcie opisu", page)
+        self.assertIn("3 150,00 zł", page)
+
+        with self.app.app_context():
+            updated = get_db().execute(
+                """
+                SELECT status, term_days, due_date, loan_amount_cents, commission_amount_cents,
+                       total_repayment_cents, daily_increase_cents, max_additional_fee_cents,
+                       collateral_type, collateral_value_cents, valuation_basis
+                FROM contracts
+                WHERE id = ?
+                """,
+                (contract["id"],),
+            ).fetchone()
+            self.assertEqual(updated["status"], "active")
+            self.assertEqual(updated["term_days"], 10)
+            self.assertEqual(updated["due_date"], "2099-01-10")
+            self.assertEqual(updated["loan_amount_cents"], 300_000)
+            self.assertEqual(updated["commission_amount_cents"], 15_000)
+            self.assertEqual(updated["total_repayment_cents"], 315_000)
+            self.assertEqual(updated["daily_increase_cents"], 3_150)
+            self.assertEqual(updated["max_additional_fee_cents"], 63_000)
+            self.assertEqual(updated["collateral_type"], "sprzęt elektroniczny")
+            self.assertEqual(updated["collateral_value_cents"], 420_000)
+            self.assertEqual(updated["valuation_basis"], "korekta po sprawdzeniu numeru seryjnego")
+
+    def test_settled_contract_cannot_be_edited(self):
+        contract = self._create_contract(issue_date="2099-02-01")
+
+        settle_response = self.client.post(
+            f"/contracts/{contract['id']}/settle",
+            data={"payment_date": "2099-02-07", "paid_amount": ""},
+            follow_redirects=True,
+        )
+        self.assertEqual(settle_response.status_code, 200)
+        self.assertNotIn("Edytuj umowę", settle_response.get_data(as_text=True))
+
+        edit_response = self.client.get(
+            f"/contracts/{contract['id']}/edit",
+            follow_redirects=True,
+        )
+        self.assertEqual(edit_response.status_code, 200)
+        self.assertIn("Można poprawiać tylko umowy aktywne", edit_response.get_data(as_text=True))
+
+        response = self.client.post(
+            f"/contracts/{contract['id']}/edit",
+            data={
+                "loan_amount": "9999,99",
+                "commission_amount": "1,00",
+                "commission_rate": "1",
+                "term_days": "30",
+                "collateral_type": "nie powinno się zapisać",
+                "collateral_description": "blokowana korekta",
+                "collateral_value": "9999,99",
+                "valuation_basis": "blokada",
+            },
+            follow_redirects=True,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        with self.app.app_context():
+            unchanged = get_db().execute(
+                """
+                SELECT status, term_days, loan_amount_cents, commission_amount_cents,
+                       collateral_description
+                FROM contracts
+                WHERE id = ?
+                """,
+                (contract["id"],),
+            ).fetchone()
+            self.assertEqual(unchanged["status"], "settled")
+            self.assertEqual(unchanged["term_days"], 7)
+            self.assertEqual(unchanged["loan_amount_cents"], 200_000)
+            self.assertEqual(unchanged["commission_amount_cents"], 20_000)
+            self.assertEqual(unchanged["collateral_description"], "Telefon testowy IMEI 123")
+
     def test_contract_form_can_create_client_and_photos_in_one_step(self):
         response = self.client.post(
             "/contracts/new",
