@@ -1,0 +1,90 @@
+{% extends "base.html" %}
+{% block title %}Edycja umowy {{ contract.contract_number }}{% endblock %}
+{% block content %}
+<section class="hero">
+  <div>
+    <h1>Korekta umowy {{ contract.contract_number }}</h1>
+    <p>Popraw dane przed rozliczeniem umowy. Numer, klient i punkt pozostają bez zmian.</p>
+  </div>
+  <a class="button" href="{{ url_for('lombard.contract_detail', contract_id=contract.id) }}">Wróć do umowy</a>
+</section>
+
+<section class="panel">
+  <h2>Dane niezmienne</h2>
+  <dl class="details">
+    <dt>Klient</dt><dd>{{ contract.first_name }} {{ contract.last_name }}</dd>
+    <dt>Punkt</dt><dd>{{ contract.branch_city }}, {{ contract.branch_address }}</dd>
+    <dt>Data umowy</dt><dd>{{ contract.issue_date|date_pl }}</dd>
+    <dt>Status</dt><dd>{{ contract.status|status_label }}</dd>
+  </dl>
+</section>
+
+<form method="post" class="panel form wide" id="contract-edit-form">
+  <h2>Kwoty i terminy</h2>
+  <div class="row">
+    <label>Kwota pożyczki
+      <input class="money-input" name="loan_amount" id="loan_amount" value="{{ form_values.loan_amount }}" required>
+    </label>
+    <label>Prowizja ręcznie
+      <input class="money-input" name="commission_amount" id="commission_amount" value="{{ form_values.commission_amount }}" placeholder="np. 100,00">
+    </label>
+    <label>Prowizja % gdy puste
+      <input type="number" step="0.01" name="commission_rate" id="commission_rate" value="10">
+    </label>
+    <label>Okres w dniach
+      <input type="number" name="term_days" id="term_days" min="1" value="{{ contract.term_days }}" required>
+    </label>
+  </div>
+
+  <div class="calculation-preview">
+    <strong>Podgląd:</strong>
+    <span>Do spłaty: <b id="preview_total">—</b></span>
+    <span>Dziennie po terminie: <b id="preview_daily">—</b></span>
+    <span>Limit opłat: <b id="preview_max">—</b></span>
+  </div>
+
+  <h2>Przedmiot zabezpieczenia</h2>
+  <div class="row">
+    <label>Rodzaj
+      <input name="collateral_type" value="{{ contract.collateral_type }}" required>
+    </label>
+    <label>Wartość szacunkowa
+      <input class="money-input" name="collateral_value" value="{{ form_values.collateral_value }}" required>
+    </label>
+  </div>
+  <label>Opis zabezpieczenia
+    <textarea name="collateral_description" rows="4" required>{{ contract.collateral_description }}</textarea>
+  </label>
+  <label>Podstawa wyceny
+    <textarea name="valuation_basis" rows="2">{{ contract.valuation_basis or "" }}</textarea>
+  </label>
+
+  <div class="actions">
+    <button class="button primary">Zapisz korektę</button>
+    <a class="button" href="{{ url_for('lombard.contract_detail', contract_id=contract.id) }}">Anuluj</a>
+  </div>
+</form>
+
+<script>
+  function parseMoney(value) {
+    return Number(String(value || "0").replace(/\s/g, "").replace(",", ".")) || 0;
+  }
+  function formatMoney(value) {
+    return value.toLocaleString("pl-PL", { style: "currency", currency: "PLN" });
+  }
+  function refreshPreview() {
+    const loan = parseMoney(document.getElementById("loan_amount").value);
+    const manualCommission = document.getElementById("commission_amount").value.trim();
+    const rate = Number(document.getElementById("commission_rate").value || 10);
+    const commission = manualCommission ? parseMoney(manualCommission) : loan * rate / 100;
+    const total = loan + commission;
+    document.getElementById("preview_total").textContent = formatMoney(total);
+    document.getElementById("preview_daily").textContent = formatMoney(total * 0.01);
+    document.getElementById("preview_max").textContent = formatMoney(total * 0.20);
+  }
+  document.querySelectorAll("#loan_amount,#commission_amount,#commission_rate,#term_days").forEach((field) => {
+    field.addEventListener("input", refreshPreview);
+  });
+  refreshPreview();
+</script>
+{% endblock %}

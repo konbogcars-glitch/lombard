@@ -1,0 +1,78 @@
+{% extends "base.html" %}
+{% block title %}Punkty lombardu{% endblock %}
+{% block content %}
+<section class="hero">
+  <div>
+    <h1>Punkty lombardu</h1>
+    <p>Wspólna baza klientów i umów z szybkim podglądem pracy każdego punktu.</p>
+  </div>
+  <a class="button primary" href="{{ url_for('lombard.contract_new') }}">Nowa umowa</a>
+</section>
+
+<section class="cards">
+  <article class="card">
+    <span class="label">Klienci w kartotece</span>
+    <strong>{{ totals.clients_total or 0 }}</strong>
+  </article>
+  <article class="card">
+    <span class="label">Umowy w systemie</span>
+    <strong>{{ totals.contracts_total or 0 }}</strong>
+  </article>
+  <article class="card warning">
+    <span class="label">Do księgowej</span>
+    <strong>{{ totals.accounting_pending_total or 0 }}</strong>
+  </article>
+  <article class="card">
+    <span class="label">Dostęp</span>
+    <strong>{% if is_admin %}3 punkty{% else %}1 punkt{% endif %}</strong>
+  </article>
+</section>
+
+<section class="branch-grid">
+  {% for branch in branches %}
+    <article class="panel branch-card">
+      <div class="panel-heading">
+        <div>
+          <h2>{{ branch.city }}</h2>
+          <p class="muted">{{ branch.name }} · {{ branch.address }}</p>
+        </div>
+        <span class="status">{{ branch.code }}</span>
+      </div>
+
+      <dl class="branch-metrics">
+        <div>
+          <dt>Klienci z umowami</dt>
+          <dd>{{ branch.clients_count or 0 }}</dd>
+        </div>
+        <div>
+          <dt>Wszystkie umowy</dt>
+          <dd>{{ branch.contracts_total or 0 }}</dd>
+        </div>
+        <div>
+          <dt>Aktywne i po terminie</dt>
+          <dd>{{ branch.open_count or 0 }}</dd>
+        </div>
+        <div>
+          <dt>Przeterminowane</dt>
+          <dd>{{ branch.expired_count or 0 }}</dd>
+        </div>
+        <div>
+          <dt>Do księgowej</dt>
+          <dd>{{ branch.accounting_pending_count or 0 }}</dd>
+        </div>
+        <div>
+          <dt>Kapitał w aktywnych</dt>
+          <dd>{{ branch.open_loan_cents|money }}</dd>
+        </div>
+      </dl>
+
+      <div class="actions branch-actions">
+        <a class="button primary" href="{{ url_for('lombard.contract_new', branch_id=branch.id) }}">Nowa umowa</a>
+        <a class="button" href="{{ url_for('lombard.archive', branch_id=branch.id) }}">Archiwum</a>
+        <a class="button" href="{{ url_for('lombard.accounting', branch_id=branch.id) }}">Księgowość</a>
+        <a class="button" href="{{ url_for('lombard.dashboard', branch_id=branch.id) }}">Panel</a>
+      </div>
+    </article>
+  {% endfor %}
+</section>
+{% endblock %}

@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% block title %}Szablon umowy{% endblock %}
+{% block content %}
+<section class="panel">
+  <div class="panel-heading">
+    <div>
+      <h1>Szablon umowy</h1>
+      <p class="muted">Wklej gotową treść umowy i użyj pól w nawiasach klamrowych, aby program automatycznie podstawiał dane.</p>
+    </div>
+    {% if using_default %}
+      <span class="status">domyślny wzór</span>
+    {% else %}
+      <span class="status">własny wzór</span>
+    {% endif %}
+  </div>
+
+  <form method="post" enctype="multipart/form-data" class="form template-editor">
+    <label>Treść umowy do PDF
+      <textarea name="contract_template" rows="28" spellcheck="false">{{ template_text }}</textarea>
+    </label>
+    <label>Wczytaj gotowy wzór z pliku TXT/MD/DOCX/PDF
+      <input type="file" name="contract_template_file" accept=".txt,.md,.docx,.pdf,text/plain,text/markdown,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/pdf">
+    </label>
+    <p class="muted">Jeżeli wybierzesz plik, jego tekst zastąpi pole powyżej przy zapisie szablonu. Import PDF wyciąga treść tekstową, więc po zapisie warto sprawdzić podział akapitów.</p>
+    <div class="actions">
+      <button class="button primary">Zapisz szablon</button>
+      <button class="button" name="reset_template" value="1" formnovalidate>Przywróć domyślny</button>
+    </div>
+  </form>
+</section>
+
+<section class="panel">
+  <h2>Dostępne pola automatyczne</h2>
+  <p class="muted">Wstaw pole w treści dokładnie w podanej formie, np. <code>{client_name}</code> albo <code>{total_repayment}</code>.</p>
+  <div class="placeholder-list">
+    {% for name, description in placeholders %}
+      <div>
+        <code>{ {{- name -}} }</code>
+        <span>{{ description }}</span>
+      </div>
+    {% endfor %}
+  </div>
+</section>
+{% endblock %}
