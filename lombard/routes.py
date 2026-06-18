@@ -201,6 +201,21 @@ def _create_accounting_batch(
     return int(cursor.lastrowid)
 
 
+def _store_accounting_batch_snapshot(*, db, batch_id: int) -> None:
+    rows = _accounting_rows_for_batch(batch_id)
+    csv_snapshot = _accounting_csv(rows)
+    package_snapshot = _accounting_package_bytes(rows)
+    db.execute(
+        """
+        UPDATE accounting_batches
+        SET csv_snapshot = ?,
+            package_snapshot = ?
+        WHERE id = ?
+        """,
+        (csv_snapshot, package_snapshot, batch_id),
+    )
+
+
 def _accounting_mailto_url(
     settings: dict,
     *,
@@ -843,6 +858,7 @@ def contract_account(contract_id: int) -> Response:
         """,
         (now, now, accounting_note, batch_id, contract_id),
     )
+    _store_accounting_batch_snapshot(db=db, batch_id=batch_id)
     db.commit()
     flash(
         f"Umowa została oznaczona jako zaksięgowana/wysłana do księgowej w paczce #{batch_id}.",
@@ -949,6 +965,7 @@ def accounting_bulk_account() -> Response:
             """,
             tuple(update_params),
         )
+        _store_accounting_batch_snapshot(db=db, batch_id=batch_id)
         db.commit()
         flash(
             f"Oznaczono jako wysłane do księgowej: {cursor.rowcount}. Utworzono paczkę #{batch_id}.",
@@ -1223,7 +1240,7 @@ def accounting_export() -> Response:
     )
 
 
-def _accounting_package_response(rows: list[dict], *, download_name: str) -> Response:
+def _accounting_package_bytes(rows: list[dict]) -> bytes:
     archive_buffer = io.BytesIO()
     with zipfile.ZipFile(archive_buffer, mode="w", compression=zipfile.ZIP_DEFLATED) as archive:
         archive.writestr("ewidencja_ksiegowa.csv", _accounting_csv(rows).encode("utf-8"))
@@ -1239,6 +1256,11 @@ def _accounting_package_response(rows: list[dict], *, download_name: str) -> Res
             archive.writestr(f"umowy/{_contract_file_stem(contract['contract_number'])}.pdf", pdf.getvalue())
 
     archive_buffer.seek(0)
+    return archive_buffer.getvalue()
+
+
+def _accounting_package_response(rows: list[dict], *, download_name: str) -> Response:
+    archive_buffer = io.BytesIO(_accounting_package_bytes(rows))
     return send_file(
         archive_buffer,
         mimetype="application/zip",
@@ -1264,8 +1286,8 @@ def accounting_package() -> Response:
 
 @bp.route("/accounting/batches/<int:batch_id>/export.csv")
 def accounting_batch_export(batch_id: int) -> Response:
-    _accounting_batch_or_404(batch_id)
-    csv_data = _accounting_csv(_accounting_rows_for_batch(batch_id))
+    batch = _accounting_batch_or_404(batch_id)
+    csv_data = batch.get("csv_snapshot") or _accounting_csv(_accounting_rows_for_batch(batch_id))
     return Response(
         csv_data,
         mimetype="text/csv; charset=utf-8",
@@ -1277,7 +1299,14 @@ def accounting_batch_export(batch_id: int) -> Response:
 
 @bp.route("/accounting/batches/<int:batch_id>/package.zip")
 def accounting_batch_package(batch_id: int) -> Response:
-    _accounting_batch_or_404(batch_id)
+    batch = _accounting_batch_or_404(batch_id)
+    if batch.get("package_snapshot"):
+        return send_file(
+            io.BytesIO(batch["package_snapshot"]),
+            mimetype="application/zip",
+            as_attachment=True,
+            download_name=f"paczka_ksiegowa_{batch_id}.zip",
+        )
     return _accounting_package_response(
         _accounting_rows_for_batch(batch_id),
         download_name=f"paczka_ksiegowa_{batch_id}.zip",

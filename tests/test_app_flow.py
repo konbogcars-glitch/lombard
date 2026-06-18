@@ -726,11 +726,41 @@ class AppFlowTest(unittest.TestCase):
 
         package_response = self.client.get(f"/accounting/batches/{batch_id}/package.zip")
         self.assertEqual(package_response.status_code, 200)
+        original_package = package_response.get_data()
         with zipfile.ZipFile(io.BytesIO(package_response.get_data())) as archive:
             names = archive.namelist()
             self.assertIn("ewidencja_ksiegowa.csv", names)
             self.assertIn("umowy/umowa_BUS_2026_0001.pdf", names)
             self.assertIn("umowy/umowa_BUS_2026_0002.pdf", names)
+
+        edit_response = self.client.post(
+            f"/clients/{first_client}/edit",
+            data={
+                "first_name": "Anna",
+                "last_name": "PoZmianie",
+                "pesel": "83010112345",
+                "document_type": "Dowód Osobisty",
+                "document_number": "83010112345ABC",
+                "phone": "700800900",
+                "email": "anna.changed@example.com",
+                "street_address": "ul. Zmieniona 2",
+                "postal_code": "28-400",
+                "city": "Pińczów",
+                "notes": "Aktualizacja po wysyłce do księgowej.",
+            },
+            follow_redirects=True,
+        )
+        self.assertEqual(edit_response.status_code, 200)
+
+        repeated_batch_csv = self.client.get(f"/accounting/batches/{batch_id}/export.csv")
+        self.assertEqual(repeated_batch_csv.status_code, 200)
+        repeated_batch_csv_data = repeated_batch_csv.get_data(as_text=True)
+        self.assertEqual(repeated_batch_csv_data, batch_csv_data)
+        self.assertNotIn("PoZmianie", repeated_batch_csv_data)
+
+        repeated_package = self.client.get(f"/accounting/batches/{batch_id}/package.zip")
+        self.assertEqual(repeated_package.status_code, 200)
+        self.assertEqual(repeated_package.get_data(), original_package)
 
     def test_branch_context_filters_dashboard_and_preselects_contract_branch(self):
         bus_contract = self._create_contract(branch_code="BUS", issue_date="2026-12-01")

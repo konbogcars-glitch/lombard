@@ -45,6 +45,8 @@ CREATE TABLE IF NOT EXISTS accounting_batches (
     accountant_email TEXT,
     accountant_name TEXT,
     note TEXT,
+    csv_snapshot TEXT,
+    package_snapshot BLOB,
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -123,6 +125,11 @@ CONTRACT_COLUMN_MIGRATIONS = {
     "accounting_batch_id": "INTEGER",
 }
 
+ACCOUNTING_BATCH_COLUMN_MIGRATIONS = {
+    "csv_snapshot": "TEXT",
+    "package_snapshot": "BLOB",
+}
+
 
 def dict_factory(cursor: sqlite3.Cursor, row: sqlite3.Row) -> dict:
     return {column[0]: row[index] for index, column in enumerate(cursor.description)}
@@ -149,6 +156,7 @@ def init_db() -> None:
     db = get_db()
     db.executescript(SCHEMA)
     _ensure_contract_columns(db)
+    _ensure_accounting_batch_columns(db)
     db.execute(
         "CREATE INDEX IF NOT EXISTS idx_contracts_accounting_batch ON contracts(accounting_batch_id)"
     )
@@ -174,6 +182,16 @@ def _ensure_contract_columns(db: sqlite3.Connection) -> None:
     for column_name, column_type in CONTRACT_COLUMN_MIGRATIONS.items():
         if column_name not in existing_columns:
             db.execute(f"ALTER TABLE contracts ADD COLUMN {column_name} {column_type}")
+
+
+def _ensure_accounting_batch_columns(db: sqlite3.Connection) -> None:
+    existing_columns = {
+        row["name"]
+        for row in db.execute("PRAGMA table_info(accounting_batches)").fetchall()
+    }
+    for column_name, column_type in ACCOUNTING_BATCH_COLUMN_MIGRATIONS.items():
+        if column_name not in existing_columns:
+            db.execute(f"ALTER TABLE accounting_batches ADD COLUMN {column_name} {column_type}")
 
 
 def next_contract_number(branch_id: int, issue_year: int) -> str:
