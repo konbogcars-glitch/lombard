@@ -502,6 +502,42 @@ class AppFlowTest(unittest.TestCase):
             csv_data = archive.read("ewidencja_ksiegowa.csv").decode("utf-8-sig")
             self.assertIn(contract["contract_number"], csv_data)
 
+    def test_accountant_contact_prepares_email_draft(self):
+        contract = self._create_contract(issue_date="2026-06-01")
+        settle_response = self.client.post(
+            f"/contracts/{contract['id']}/settle",
+            data={"payment_date": "2026-06-07", "paid_amount": ""},
+            follow_redirects=True,
+        )
+        self.assertEqual(settle_response.status_code, 200)
+
+        branch_id = self._branch_id("BUS")
+        response = self.client.post(
+            "/accounting/settings",
+            data={
+                "accountant_email": "ksiegowa@example.com",
+                "accountant_name": "Pani Anno",
+                "next": f"/accounting?branch_id={branch_id}",
+            },
+            follow_redirects=True,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        page = response.get_data(as_text=True)
+        self.assertIn('value="ksiegowa@example.com"', page)
+        self.assertIn("mailto:ksiegowa@example.com", page)
+        self.assertIn("Ewidencja+um%C3%B3w+lombardowych", page)
+        self.assertIn("Pani+Anno", page)
+        self.assertIn("Paczka ZIP", page)
+
+        with self.app.app_context():
+            settings = {
+                row["key"]: row["value"]
+                for row in get_db().execute("SELECT key, value FROM settings").fetchall()
+            }
+            self.assertEqual(settings["accountant_email"], "ksiegowa@example.com")
+            self.assertEqual(settings["accountant_name"], "Pani Anno")
+
     def test_sold_contract_enters_accounting_register(self):
         contract = self._create_contract(issue_date="2026-01-01", term_days="1")
 

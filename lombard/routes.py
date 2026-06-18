@@ -7,6 +7,7 @@ import zipfile
 from datetime import date, datetime
 from decimal import Decimal
 from pathlib import Path
+from urllib.parse import quote, urlencode
 
 from flask import (
     Blueprint,
@@ -38,6 +39,8 @@ from .pdf import build_contract_pdf
 
 bp = Blueprint("lombard", __name__)
 ALLOWED_EXTENSIONS = {"jpg", "jpeg", "png", "webp"}
+ACCOUNTANT_EMAIL_KEY = "accountant_email"
+ACCOUNTANT_NAME_KEY = "accountant_name"
 
 
 def _today() -> date:
@@ -50,6 +53,31 @@ def _parse_date(value: str) -> date:
 
 def _branch_options() -> list[dict]:
     return query_all("SELECT * FROM branches ORDER BY id")
+
+
+def _get_setting(key: str) -> str:
+    row = query_one("SELECT value FROM settings WHERE key = ?", (key,))
+    return row["value"] if row else ""
+
+
+def _save_setting(*, db, key: str, value: str) -> None:
+    db.execute(
+        """
+        INSERT INTO settings(key, value, updated_at)
+        VALUES (?, ?, CURRENT_TIMESTAMP)
+        ON CONFLICT(key) DO UPDATE SET
+            value = excluded.value,
+            updated_at = CURRENT_TIMESTAMP
+        """,
+        (key, value),
+    )
+
+
+def _accountant_settings() -> dict:
+    return {
+        "email": _get_setting(ACCOUNTANT_EMAIL_KEY),
+        "name": _get_setting(ACCOUNTANT_NAME_KEY),
+    }
 
 
 def _current_branch_id() -> int | None:
@@ -76,6 +104,33 @@ def _safe_redirect_target(value: str | None) -> str:
     if value and value.startswith("/") and not value.startswith("//"):
         return value
     return url_for("lombard.dashboard")
+
+
+def _branch_label(branch_id: int | None) -> str:
+    if branch_id is None:
+        return "wszystkie punkty"
+    branch = query_one("SELECT city FROM branches WHERE id = ?", (branch_id,))
+    return branch["city"] if branch else "wybrany punkt"
+
+
+def _accounting_mailto_url(settings: dict, *, branch_id: int | None) -> str | None:
+    email = settings["email"].strip()
+    if not email:
+        return None
+
+    branch_label = _branch_label(branch_id)
+    subject = f"Ewidencja umów lombardowych - {branch_label} - {_today().isoformat()}"
+    greeting = f"Dzień dobry {settings['name']}," if settings["name"].strip() else "Dzień dobry,"
+    body = "\n\n".join(
+        [
+            greeting,
+            "W załączeniu przesyłam paczkę ZIP z ewidencją CSV oraz PDF-ami rozliczonych umów lombardowych.",
+            f"Zakres: {branch_label}.",
+            "Proszę o zaksięgowanie przesłanych pozycji.",
+            "Pozdrawiam",
+        ]
+    )
+    return f"mailto:{quote(email, safe='@,;.+-_')}?{urlencode({'subject': subject, 'body': body})}"
 
 
 def _contract_or_404(contract_id: int) -> dict:
@@ -603,6 +658,24 @@ def contract_account(contract_id: int) -> Response:
     return redirect(url_for("lombard.accounting"))
 
 
+@bp.route("/accounting/settings", methods=["POST"])
+def accounting_settings() -> Response:
+    db = get_db()
+    _save_setting(
+        db=db,
+        key=ACCOUNTANT_EMAIL_KEY,
+        value=request.form.get("accountant_email", "").strip(),
+    )
+    _save_setting(
+        db=db,
+        key=ACCOUNTANT_NAME_KEY,
+        value=request.form.get("accountant_name", "").strip(),
+    )
+    db.commit()
+    flash("Zapisano dane księgowej do przygotowania wysyłki.", "success")
+    return redirect(_safe_redirect_target(request.form.get("next")))
+
+
 @bp.route("/accounting/bulk-account", methods=["POST"])
 def accounting_bulk_account() -> Response:
     branch_id = request.form.get("branch_id", type=int)
@@ -711,12 +784,15 @@ def accounting() -> str:
         tuple(params),
     )
     branches = _branch_options()
+    accountant_settings = _accountant_settings()
     return render_template(
         "accounting.html",
         contracts=contracts,
         branches=branches,
         selected_branch_id=branch_id,
         showing_all_branches=showing_all_branches,
+        accountant_settings=accountant_settings,
+        accounting_mailto_url=_accounting_mailto_url(accountant_settings, branch_id=branch_id),
     )
 
 

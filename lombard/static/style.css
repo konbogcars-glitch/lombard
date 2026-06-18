@@ -306,6 +306,34 @@ button:hover {
   padding: 14px;
 }
 
+.accountant-panel {
+  background: #f8fbff;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  display: grid;
+  gap: 12px;
+  grid-template-columns: minmax(0, 2fr) minmax(240px, 1fr);
+  margin: 14px 0;
+  padding: 14px;
+}
+
+.accountant-settings {
+  align-items: end;
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(2, minmax(180px, 1fr)) auto;
+}
+
+.send-help {
+  align-content: center;
+  display: grid;
+  gap: 8px;
+}
+
+.send-help p {
+  margin: 0;
+}
+
 .details {
   display: grid;
   grid-template-columns: 190px minmax(0, 1fr);
@@ -417,6 +445,11 @@ button:hover {
   }
 
   .bulk-accounting {
+    grid-template-columns: 1fr;
+  }
+
+  .accountant-panel,
+  .accountant-settings {
     grid-template-columns: 1fr;
   }
 

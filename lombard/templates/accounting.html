@@ -25,6 +25,27 @@
     <button class="button">Filtruj</button>
   </form>
 
+  <section class="accountant-panel">
+    <form method="post" action="{{ url_for('lombard.accounting_settings') }}" class="accountant-settings">
+      <input type="hidden" name="next" value="{{ request.full_path if request.query_string else request.path }}">
+      <label>Email księgowej
+        <input type="email" name="accountant_email" value="{{ accountant_settings.email }}" placeholder="ksiegowa@example.com">
+      </label>
+      <label>Imię lub nazwa kontaktu
+        <input name="accountant_name" value="{{ accountant_settings.name }}" placeholder="np. Pani Anno">
+      </label>
+      <button class="button">Zapisz kontakt</button>
+    </form>
+    <div class="send-help">
+      {% if accounting_mailto_url %}
+        <a class="button primary" href="{{ accounting_mailto_url }}">Przygotuj e-mail do księgowej</a>
+        <p class="muted">Najpierw pobierz paczkę ZIP, potem dołącz ją do przygotowanej wiadomości.</p>
+      {% else %}
+        <p class="muted">Zapisz email księgowej, aby program przygotował temat i treść wiadomości do wysyłki ewidencji.</p>
+      {% endif %}
+    </div>
+  </section>
+
   {% if contracts %}
     <form method="post" action="{{ url_for('lombard.accounting_bulk_account') }}" class="bulk-accounting">
       {% if selected_branch_id %}
