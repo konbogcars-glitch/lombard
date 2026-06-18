@@ -27,6 +27,23 @@ flask --app app run
 
 Po uruchomieniu otwórz `http://127.0.0.1:5000`.
 
+## Logowanie i punkty
+
+Przy pierwszym uruchomieniu aplikacja zakłada konta startowe:
+
+- `admin` / `admin123` - pełny dostęp do wszystkich punktów i ustawień,
+- `busko`, `chmielnik`, `pinczow` / `lombard123` - dostęp do przypisanego punktu.
+
+Przed utworzeniem produkcyjnej bazy ustaw własne hasła zmiennymi środowiskowymi:
+
+```bash
+export LOMBARD_ADMIN_PASSWORD="mocne-haslo-administratora"
+export LOMBARD_BRANCH_PASSWORD="mocne-haslo-punktow"
+```
+
+Administrator może przełączać widok między wszystkimi lokalizacjami, a konto punktu
+pracuje wyłącznie na swoim oddziale. Kartoteka klientów pozostaje wspólna.
+
 ## Dane aplikacji
 
 Domyślnie aplikacja zapisuje bazę SQLite i zdjęcia w katalogu `instance/`:

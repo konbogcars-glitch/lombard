@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 from flask import Flask
@@ -25,6 +26,10 @@ def create_app(test_config: dict | None = None) -> Flask:
         DATABASE=str(instance_path / "lombard.sqlite3"),
         UPLOAD_FOLDER=str(instance_path / "uploads"),
         MAX_CONTENT_LENGTH=25 * 1024 * 1024,
+        DEFAULT_ADMIN_USERNAME=os.environ.get("LOMBARD_ADMIN_USERNAME", "admin"),
+        DEFAULT_ADMIN_PASSWORD=os.environ.get("LOMBARD_ADMIN_PASSWORD", "admin123"),
+        DEFAULT_BRANCH_PASSWORD=os.environ.get("LOMBARD_BRANCH_PASSWORD", "lombard123"),
+        SEED_DEFAULT_USERS=True,
     )
     if test_config:
         app.config.update(test_config)

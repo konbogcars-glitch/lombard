@@ -15,6 +15,7 @@ from flask import (
     abort,
     current_app,
     flash,
+    g,
     redirect,
     render_template,
     request,
@@ -23,6 +24,7 @@ from flask import (
     session,
     url_for,
 )
+from werkzeug.security import check_password_hash
 from werkzeug.utils import secure_filename
 
 from .calculations import (
@@ -46,6 +48,7 @@ ALLOWED_EXTENSIONS = {"jpg", "jpeg", "png", "webp"}
 ACCOUNTANT_EMAIL_KEY = "accountant_email"
 ACCOUNTANT_NAME_KEY = "accountant_name"
 CONTRACT_TEMPLATE_KEY = "contract_template_text"
+AUTH_EXEMPT_ENDPOINTS = {"lombard.login"}
 
 
 def _today() -> date:
@@ -56,7 +59,43 @@ def _parse_date(value: str) -> date:
     return datetime.strptime(value, "%Y-%m-%d").date()
 
 
+def _current_user() -> dict | None:
+    return getattr(g, "current_user", None)
+
+
+def _is_admin() -> bool:
+    user = _current_user()
+    return bool(user and user["role"] == "admin")
+
+
+def _current_user_branch_id() -> int | None:
+    user = _current_user()
+    if not user or user["role"] == "admin":
+        return None
+    return int(user["branch_id"]) if user["branch_id"] is not None else None
+
+
+def _can_access_branch(branch_id: int | None) -> bool:
+    if _is_admin():
+        return True
+    user_branch_id = _current_user_branch_id()
+    return bool(branch_id and user_branch_id == int(branch_id))
+
+
+def _require_branch_access(branch_id: int | None) -> None:
+    if not _can_access_branch(branch_id):
+        abort(403)
+
+
+def _require_admin() -> None:
+    if not _is_admin():
+        abort(403)
+
+
 def _branch_options() -> list[dict]:
+    user_branch_id = _current_user_branch_id()
+    if user_branch_id:
+        return query_all("SELECT * FROM branches WHERE id = ? ORDER BY id", (user_branch_id,))
     return query_all("SELECT * FROM branches ORDER BY id")
 
 
@@ -94,6 +133,9 @@ def _money_input(cents: int | None) -> str:
 
 
 def _current_branch_id() -> int | None:
+    user_branch_id = _current_user_branch_id()
+    if user_branch_id:
+        return user_branch_id
     branch_id = session.get("branch_context_id")
     if branch_id is None:
         return None
@@ -105,6 +147,9 @@ def _current_branch_id() -> int | None:
 
 
 def _branch_id_from_args() -> tuple[int | None, bool]:
+    user_branch_id = _current_user_branch_id()
+    if user_branch_id:
+        return user_branch_id, False
     raw_value = request.args.get("branch_id")
     if raw_value == "all":
         return None, True
@@ -275,6 +320,7 @@ def _contract_or_404(contract_id: int) -> dict:
     )
     if contract is None:
         abort(404)
+    _require_branch_access(contract["branch_id"])
     return contract
 
 
@@ -416,6 +462,79 @@ def _refresh_overdue_contracts(today: date | None = None) -> None:
     db.commit()
 
 
+@bp.before_request
+def load_current_user() -> Response | None:
+    g.current_user = None
+    user_id = session.get("user_id")
+    if user_id:
+        g.current_user = query_one(
+            """
+            SELECT users.*, branches.city AS branch_city, branches.code AS branch_code
+            FROM users
+            LEFT JOIN branches ON branches.id = users.branch_id
+            WHERE users.id = ? AND users.is_active = 1
+            """,
+            (user_id,),
+        )
+        if g.current_user is None:
+            session.clear()
+
+    if request.endpoint in AUTH_EXEMPT_ENDPOINTS:
+        return None
+
+    if g.current_user is None:
+        next_url = request.full_path if request.query_string else request.path
+        return redirect(url_for("lombard.login", next=next_url))
+
+    user_branch_id = _current_user_branch_id()
+    if user_branch_id:
+        session["branch_context_id"] = user_branch_id
+    return None
+
+
+@bp.route("/login", methods=["GET", "POST"])
+def login() -> str | Response:
+    if _current_user() is not None:
+        return redirect(url_for("lombard.dashboard"))
+
+    if request.method == "POST":
+        username = request.form.get("username", "").strip()
+        password = request.form.get("password", "")
+        user = query_one(
+            """
+            SELECT users.*, branches.city AS branch_city
+            FROM users
+            LEFT JOIN branches ON branches.id = users.branch_id
+            WHERE users.username = ? AND users.is_active = 1
+            """,
+            (username,),
+        )
+        if user and check_password_hash(user["password_hash"], password):
+            session.clear()
+            session["user_id"] = user["id"]
+            if user["branch_id"]:
+                session["branch_context_id"] = user["branch_id"]
+            get_db().execute(
+                "UPDATE users SET last_login_at = CURRENT_TIMESTAMP WHERE id = ?",
+                (user["id"],),
+            )
+            get_db().commit()
+            flash(f"Zalogowano jako {user['display_name']}.", "success")
+            return redirect(_safe_redirect_target(request.form.get("next")))
+
+        flash("Nieprawidłowy login lub hasło.", "warning")
+
+    next_url = _safe_redirect_target(request.args.get("next"))
+    return render_template("login.html", next_url=next_url)
+
+
+@bp.route("/logout", methods=["POST"])
+def logout() -> Response:
+    session.clear()
+    flash("Wylogowano z programu.", "success")
+    return redirect(url_for("lombard.login"))
+
+
 @bp.app_context_processor
 def inject_branch_context() -> dict:
     current_branch_id = _current_branch_id()
@@ -426,11 +545,20 @@ def inject_branch_context() -> dict:
         "branch_options": _branch_options(),
         "current_branch": current_branch,
         "current_branch_id": current_branch_id,
+        "current_user": _current_user(),
+        "is_admin": _is_admin(),
     }
 
 
 @bp.route("/context/branch", methods=["POST"])
 def set_branch_context() -> Response:
+    user_branch_id = _current_user_branch_id()
+    if user_branch_id:
+        branch = query_one("SELECT * FROM branches WHERE id = ?", (user_branch_id,))
+        session["branch_context_id"] = user_branch_id
+        flash(f"Konto punktu pracuje wyłącznie w lokalizacji: {branch['city']}.", "warning")
+        return redirect(_safe_redirect_target(request.form.get("next")))
+
     raw_branch_id = request.form.get("branch_id", "").strip()
     if not raw_branch_id:
         session.pop("branch_context_id", None)
@@ -487,8 +615,14 @@ def dashboard() -> str:
 
 
 def _branch_workload_rows() -> list[dict]:
+    branch_filter = ""
+    params: tuple[int, ...] = ()
+    user_branch_id = _current_user_branch_id()
+    if user_branch_id:
+        branch_filter = "WHERE branches.id = ?"
+        params = (user_branch_id,)
     return query_all(
-        """
+        f"""
         SELECT
             branches.*,
             COUNT(contracts.id) AS contracts_total,
@@ -512,25 +646,33 @@ def _branch_workload_rows() -> list[dict]:
             ), 0) AS open_loan_cents
         FROM branches
         LEFT JOIN contracts ON contracts.branch_id = branches.id
+        {branch_filter}
         GROUP BY branches.id
         ORDER BY branches.id
-        """
+        """,
+        params,
     )
 
 
 @bp.route("/branches")
 def branches() -> str:
     _refresh_overdue_contracts()
+    user_branch_id = _current_user_branch_id()
+    contract_filter = "WHERE branch_id = ?" if user_branch_id else ""
+    accounting_filter = "AND branch_id = ?" if user_branch_id else ""
+    params = (user_branch_id,) if user_branch_id else ()
     totals = query_one(
-        """
+        f"""
         SELECT
             (SELECT COUNT(*) FROM clients) AS clients_total,
-            (SELECT COUNT(*) FROM contracts) AS contracts_total,
+            (SELECT COUNT(*) FROM contracts {contract_filter}) AS contracts_total,
             (SELECT COUNT(*)
              FROM contracts
              WHERE status IN ('settled', 'sold')
-               AND accountant_sent_at IS NULL) AS accounting_pending_total
-        """
+               AND accountant_sent_at IS NULL
+               {accounting_filter}) AS accounting_pending_total
+        """,
+        params + params,
     )
     return render_template(
         "branches.html",
@@ -586,15 +728,22 @@ def clients() -> str | Response:
 @bp.route("/clients/<int:client_id>")
 def client_detail(client_id: int) -> str:
     client = _client_or_404(client_id)
+    branch_clause = ""
+    params: list[int] = [client_id]
+    user_branch_id = _current_user_branch_id()
+    if user_branch_id:
+        branch_clause = "AND contracts.branch_id = ?"
+        params.append(user_branch_id)
     contracts = query_all(
-        """
+        f"""
         SELECT contracts.*, branches.city AS branch_city
         FROM contracts
         JOIN branches ON branches.id = contracts.branch_id
         WHERE client_id = ?
+        {branch_clause}
         ORDER BY issue_date DESC, id DESC
         """,
-        (client_id,),
+        tuple(params),
     )
     return render_template("client_detail.html", client=client, contracts=contracts)
 
@@ -661,11 +810,13 @@ def contract_new() -> str | Response:
     clients = query_all("SELECT * FROM clients ORDER BY last_name, first_name")
     branches = _branch_options()
     selected_client_id = request.args.get("client_id", type=int)
-    selected_branch_id = request.args.get("branch_id", type=int) or _current_branch_id()
+    requested_branch_id = request.args.get("branch_id", type=int) or _current_branch_id()
+    selected_branch_id = requested_branch_id if _can_access_branch(requested_branch_id) else _current_branch_id()
 
     if request.method == "POST":
         issue_date = _parse_date(request.form["issue_date"])
         branch_id = int(request.form["branch_id"])
+        _require_branch_access(branch_id)
         client_mode = request.form.get("client_mode") or (
             "existing" if request.form.get("client_id") else "new"
         )
@@ -875,6 +1026,7 @@ def contract_photos(contract_id: int) -> Response:
 
 @bp.route("/uploads/<int:contract_id>/<path:filename>")
 def uploaded_photo(contract_id: int, filename: str) -> Response:
+    _contract_or_404(contract_id)
     directory = Path(current_app.config["UPLOAD_FOLDER"]) / str(contract_id)
     return send_from_directory(directory, filename)
 
@@ -1004,6 +1156,7 @@ def contract_account(contract_id: int) -> Response:
 
 @bp.route("/accounting/settings", methods=["POST"])
 def accounting_settings() -> Response:
+    _require_admin()
     db = get_db()
     _save_setting(
         db=db,
@@ -1022,6 +1175,7 @@ def accounting_settings() -> Response:
 
 @bp.route("/contract-template", methods=["GET", "POST"])
 def contract_template_settings() -> str | Response:
+    _require_admin()
     db = get_db()
     if request.method == "POST":
         template_text = ""
@@ -1050,8 +1204,12 @@ def contract_template_settings() -> str | Response:
 def accounting_bulk_account() -> Response:
     db = get_db()
     raw_branch_id = request.form.get("branch_id", "").strip()
-    showing_all_branches = raw_branch_id == "all"
-    branch_id = int(raw_branch_id) if raw_branch_id and not showing_all_branches else None
+    if _current_user_branch_id():
+        branch_id = _current_user_branch_id()
+        showing_all_branches = False
+    else:
+        showing_all_branches = raw_branch_id == "all"
+        branch_id = int(raw_branch_id) if raw_branch_id and not showing_all_branches else None
     date_from = _normalize_date_filter(request.form.get("date_from", ""), "data od")
     date_to = _normalize_date_filter(request.form.get("date_to", ""), "data do")
     accounting_note = request.form.get("accounting_note", "").strip()
@@ -1225,15 +1383,23 @@ def accounting() -> str:
 
 
 def _accounting_batch_rows(limit: int = 8) -> list[dict]:
+    branch_clause = ""
+    params: list[int] = []
+    user_branch_id = _current_user_branch_id()
+    if user_branch_id:
+        branch_clause = "WHERE accounting_batches.branch_id = ?"
+        params.append(user_branch_id)
+    params.append(limit)
     return query_all(
-        """
+        f"""
         SELECT accounting_batches.*, branches.city AS branch_city
         FROM accounting_batches
         LEFT JOIN branches ON branches.id = accounting_batches.branch_id
+        {branch_clause}
         ORDER BY accounting_batches.created_at DESC, accounting_batches.id DESC
         LIMIT ?
         """,
-        (limit,),
+        tuple(params),
     )
 
 
@@ -1249,6 +1415,8 @@ def _accounting_batch_or_404(batch_id: int) -> dict:
     )
     if batch is None:
         abort(404)
+    if _current_user_branch_id() and batch["branch_id"] != _current_user_branch_id():
+        abort(403)
     return batch
 
 

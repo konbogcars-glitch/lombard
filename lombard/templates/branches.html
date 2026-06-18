@@ -24,7 +24,7 @@
   </article>
   <article class="card">
     <span class="label">Dostęp</span>
-    <strong>3 punkty</strong>
+    <strong>{% if is_admin %}3 punkty{% else %}1 punkt{% endif %}</strong>
   </article>
 </section>
 

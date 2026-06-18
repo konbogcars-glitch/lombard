@@ -16,7 +16,9 @@
 
   <form method="get" class="filters">
     <select name="branch_id">
-      <option value="all" {% if not selected_branch_id %}selected{% endif %}>Wszystkie punkty</option>
+      {% if is_admin %}
+        <option value="all" {% if not selected_branch_id %}selected{% endif %}>Wszystkie punkty</option>
+      {% endif %}
       {% for branch in branches %}
         <option value="{{ branch.id }}" {% if selected_branch_id == branch.id %}selected{% endif %}>{{ branch.city }}</option>
       {% endfor %}
@@ -31,16 +33,18 @@
   </form>
 
   <section class="accountant-panel">
-    <form method="post" action="{{ url_for('lombard.accounting_settings') }}" class="accountant-settings">
-      <input type="hidden" name="next" value="{{ request.full_path if request.query_string else request.path }}">
-      <label>Email księgowej
-        <input type="email" name="accountant_email" value="{{ accountant_settings.email }}" placeholder="ksiegowa@example.com">
-      </label>
-      <label>Imię lub nazwa kontaktu
-        <input name="accountant_name" value="{{ accountant_settings.name }}" placeholder="np. Pani Anno">
-      </label>
-      <button class="button">Zapisz kontakt</button>
-    </form>
+    {% if is_admin %}
+      <form method="post" action="{{ url_for('lombard.accounting_settings') }}" class="accountant-settings">
+        <input type="hidden" name="next" value="{{ request.full_path if request.query_string else request.path }}">
+        <label>Email księgowej
+          <input type="email" name="accountant_email" value="{{ accountant_settings.email }}" placeholder="ksiegowa@example.com">
+        </label>
+        <label>Imię lub nazwa kontaktu
+          <input name="accountant_name" value="{{ accountant_settings.name }}" placeholder="np. Pani Anno">
+        </label>
+        <button class="button">Zapisz kontakt</button>
+      </form>
+    {% endif %}
     <div class="send-help">
       {% if accounting_mailto_url %}
         <a class="button primary" href="{{ accounting_mailto_url }}">Przygotuj e-mail do księgowej</a>

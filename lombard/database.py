@@ -4,6 +4,7 @@ import sqlite3
 from pathlib import Path
 
 from flask import current_app, g
+from werkzeug.security import generate_password_hash
 
 
 SCHEMA = """
@@ -105,6 +106,21 @@ CREATE TABLE IF NOT EXISTS settings (
     value TEXT NOT NULL DEFAULT '',
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
+
+CREATE TABLE IF NOT EXISTS users (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    username TEXT NOT NULL UNIQUE,
+    password_hash TEXT NOT NULL,
+    display_name TEXT NOT NULL,
+    role TEXT NOT NULL DEFAULT 'branch',
+    branch_id INTEGER REFERENCES branches(id),
+    is_active INTEGER NOT NULL DEFAULT 1,
+    last_login_at TEXT,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_users_branch ON users(branch_id);
 """
 
 
@@ -171,6 +187,7 @@ def init_db() -> None:
         """,
         BRANCHES,
     )
+    _ensure_default_users(db)
     db.commit()
 
 
@@ -192,6 +209,44 @@ def _ensure_accounting_batch_columns(db: sqlite3.Connection) -> None:
     for column_name, column_type in ACCOUNTING_BATCH_COLUMN_MIGRATIONS.items():
         if column_name not in existing_columns:
             db.execute(f"ALTER TABLE accounting_batches ADD COLUMN {column_name} {column_type}")
+
+
+def _ensure_default_users(db: sqlite3.Connection) -> None:
+    if not current_app.config.get("SEED_DEFAULT_USERS", True):
+        return
+
+    user_count = db.execute("SELECT COUNT(*) AS count FROM users").fetchone()["count"]
+    if user_count:
+        return
+
+    admin_username = current_app.config.get("DEFAULT_ADMIN_USERNAME", "admin")
+    admin_password = current_app.config.get("DEFAULT_ADMIN_PASSWORD", "admin123")
+    branch_password = current_app.config.get("DEFAULT_BRANCH_PASSWORD", "lombard123")
+    default_users = [
+        (admin_username, admin_password, "Administrator", "admin", None),
+        ("busko", branch_password, "Punkt Busko-Zdrój", "branch", "BUS"),
+        ("chmielnik", branch_password, "Punkt Chmielnik", "branch", "CHM"),
+        ("pinczow", branch_password, "Punkt Pińczów", "branch", "PIN"),
+    ]
+
+    for username, password, display_name, role, branch_code in default_users:
+        branch_id = None
+        if branch_code:
+            branch = db.execute("SELECT id FROM branches WHERE code = ?", (branch_code,)).fetchone()
+            branch_id = branch["id"] if branch else None
+        db.execute(
+            """
+            INSERT INTO users(username, password_hash, display_name, role, branch_id)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (
+                username,
+                generate_password_hash(password),
+                display_name,
+                role,
+                branch_id,
+            ),
+        )
 
 
 def next_contract_number(branch_id: int, issue_year: int) -> str:

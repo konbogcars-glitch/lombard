@@ -21,9 +21,24 @@ class AppFlowTest(unittest.TestCase):
             }
         )
         self.client = self.app.test_client()
+        self._login("admin", "admin123")
 
     def tearDown(self):
         self.tempdir.cleanup()
+
+    def _login(self, username, password):
+        response = self.client.post(
+            "/login",
+            data={"username": username, "password": password},
+            follow_redirects=True,
+        )
+        self.assertEqual(response.status_code, 200)
+        return response
+
+    def _logout(self):
+        response = self.client.post("/logout", follow_redirects=True)
+        self.assertEqual(response.status_code, 200)
+        return response
 
     def _branch_id(self, code):
         with self.app.app_context():
@@ -91,6 +106,64 @@ class AppFlowTest(unittest.TestCase):
             return get_db().execute(
                 "SELECT * FROM contracts ORDER BY id DESC LIMIT 1",
             ).fetchone()
+
+    def test_login_is_required_for_application_routes(self):
+        self._logout()
+
+        response = self.client.get("/")
+        self.assertEqual(response.status_code, 302)
+        self.assertIn("/login", response.headers["Location"])
+
+        login_page = self.client.get(response.headers["Location"])
+        self.assertEqual(login_page.status_code, 200)
+        self.assertIn("Logowanie do programu lombardu", login_page.get_data(as_text=True))
+
+    def test_branch_user_is_limited_to_own_contracts(self):
+        bus_client = self._create_client(first_name="Anna", pesel="80010112345")
+        chm_client = self._create_client(first_name="Ewa", pesel="81010112345")
+        bus_contract = self._create_contract(branch_code="BUS", client_id=bus_client)
+        chm_contract = self._create_contract(branch_code="CHM", client_id=chm_client)
+
+        self._logout()
+        self._login("busko", "lombard123")
+
+        bus_page = self.client.get(f"/contracts/{bus_contract['id']}")
+        self.assertEqual(bus_page.status_code, 200)
+        self.assertIn(bus_contract["contract_number"], bus_page.get_data(as_text=True))
+
+        chm_page = self.client.get(f"/contracts/{chm_contract['id']}")
+        self.assertEqual(chm_page.status_code, 403)
+
+        archive_page = self.client.get("/archive?branch_id=all")
+        self.assertEqual(archive_page.status_code, 200)
+        archive = archive_page.get_data(as_text=True)
+        self.assertIn(bus_contract["contract_number"], archive)
+        self.assertNotIn(chm_contract["contract_number"], archive)
+
+        with self.app.app_context():
+            contract_count = get_db().execute("SELECT COUNT(*) AS count FROM contracts").fetchone()["count"]
+
+        tampered_response = self.client.post(
+            "/contracts/new",
+            data={
+                "branch_id": self._branch_id("CHM"),
+                "client_id": bus_client,
+                "issue_date": "2026-05-01",
+                "loan_amount": "1000,00",
+                "commission_amount": "100,00",
+                "commission_rate": "10",
+                "term_days": "7",
+                "collateral_type": "rzecz ruchoma",
+                "collateral_description": "Próba cudzej lokalizacji",
+                "collateral_value": "1500,00",
+                "valuation_basis": "test",
+            },
+            follow_redirects=False,
+        )
+        self.assertEqual(tampered_response.status_code, 403)
+        with self.app.app_context():
+            unchanged_count = get_db().execute("SELECT COUNT(*) AS count FROM contracts").fetchone()["count"]
+            self.assertEqual(unchanged_count, contract_count)
 
     def test_client_card_can_be_updated_for_existing_contracts(self):
         client_id = self._create_client()

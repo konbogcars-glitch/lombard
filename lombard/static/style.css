@@ -36,6 +36,7 @@ a:hover {
   background: #0f172a;
   color: #fff;
   display: flex;
+  gap: 18px;
   justify-content: space-between;
   padding: 14px 24px;
   position: sticky;
@@ -45,6 +46,7 @@ a:hover {
 
 .topbar nav {
   display: flex;
+  flex-wrap: wrap;
   gap: 14px;
 }
 
@@ -69,6 +71,23 @@ a:hover {
 }
 
 .topbar a {
+  color: #e7eefc;
+}
+
+.user-menu {
+  align-items: flex-end;
+  color: #e7eefc;
+  display: grid;
+  gap: 2px;
+  justify-items: end;
+  min-width: 120px;
+}
+
+.user-menu small {
+  color: #cbd5e1;
+}
+
+.user-menu .link-button {
   color: #e7eefc;
 }
 
@@ -501,6 +520,19 @@ button:hover {
   padding: 0;
 }
 
+.auth-panel {
+  display: grid;
+  gap: 18px;
+  grid-template-columns: minmax(0, 1fr) minmax(280px, 420px);
+}
+
+.login-help {
+  background: #f8fbff;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 16px;
+}
+
 @media (max-width: 900px) {
   .topbar,
   .hero,
@@ -527,7 +559,8 @@ button:hover {
   }
 
   .accountant-panel,
-  .accountant-settings {
+  .accountant-settings,
+  .auth-panel {
     grid-template-columns: 1fr;
   }
 
