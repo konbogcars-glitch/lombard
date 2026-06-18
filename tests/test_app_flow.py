@@ -338,12 +338,12 @@ class AppFlowTest(unittest.TestCase):
         self.assertEqual(by_number[chm_contract["contract_number"]]["status"], "settled")
 
     def test_branch_context_filters_dashboard_and_preselects_contract_branch(self):
-        bus_contract = self._create_contract(branch_code="BUS", issue_date="2026-04-01")
+        bus_contract = self._create_contract(branch_code="BUS", issue_date="2026-12-01")
         chm_client = self._create_client(first_name="Ewa", pesel="82010112345")
         chm_contract = self._create_contract(
             branch_code="CHM",
             client_id=chm_client,
-            issue_date="2026-04-01",
+            issue_date="2026-12-01",
         )
 
         branch_id = self._branch_id("CHM")
