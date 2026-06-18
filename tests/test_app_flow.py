@@ -4,6 +4,9 @@ import unittest
 import zipfile
 from pathlib import Path
 
+from docx import Document
+from reportlab.pdfgen import canvas
+
 from lombard import create_app
 from lombard.database import get_db
 
@@ -106,6 +109,26 @@ class AppFlowTest(unittest.TestCase):
             return get_db().execute(
                 "SELECT * FROM contracts ORDER BY id DESC LIMIT 1",
             ).fetchone()
+
+    def _docx_template_bytes(self, lines):
+        document = Document()
+        for line in lines:
+            document.add_paragraph(line)
+        buffer = io.BytesIO()
+        document.save(buffer)
+        buffer.seek(0)
+        return buffer
+
+    def _pdf_template_bytes(self, lines):
+        buffer = io.BytesIO()
+        pdf = canvas.Canvas(buffer)
+        y = 800
+        for line in lines:
+            pdf.drawString(40, y, line)
+            y -= 20
+        pdf.save()
+        buffer.seek(0)
+        return buffer
 
     def test_login_is_required_for_application_routes(self):
         self._logout()
@@ -1153,6 +1176,68 @@ class AppFlowTest(unittest.TestCase):
             ).fetchone()
             self.assertIn("Wzór z pliku dla {client_name}", template["value"])
             self.assertNotIn("zastąpiona plikiem", template["value"])
+
+    def test_contract_template_can_be_loaded_from_docx_file(self):
+        response = self.client.post(
+            "/contract-template",
+            data={
+                "contract_template": "Ta treść powinna zostać zastąpiona plikiem DOCX.",
+                "contract_template_file": (
+                    self._docx_template_bytes(
+                        [
+                            "Wzór DOCX dla {client_name}",
+                            "Kwota pożyczki: {loan_amount}",
+                        ]
+                    ),
+                    "gotowa_umowa.docx",
+                ),
+            },
+            content_type="multipart/form-data",
+            follow_redirects=True,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        page = response.get_data(as_text=True)
+        self.assertIn("Wzór DOCX dla {client_name}", page)
+        self.assertNotIn("zastąpiona plikiem DOCX", page)
+
+        with self.app.app_context():
+            template = get_db().execute(
+                "SELECT value FROM settings WHERE key = 'contract_template_text'",
+            ).fetchone()
+            self.assertIn("Wzór DOCX dla {client_name}", template["value"])
+            self.assertIn("Kwota pożyczki: {loan_amount}", template["value"])
+
+    def test_contract_template_can_be_loaded_from_pdf_file(self):
+        response = self.client.post(
+            "/contract-template",
+            data={
+                "contract_template": "Ta treść powinna zostać zastąpiona plikiem PDF.",
+                "contract_template_file": (
+                    self._pdf_template_bytes(
+                        [
+                            "Wzor PDF dla {client_name}",
+                            "Do splaty: {total_repayment}",
+                        ]
+                    ),
+                    "gotowa_umowa.pdf",
+                ),
+            },
+            content_type="multipart/form-data",
+            follow_redirects=True,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        page = response.get_data(as_text=True)
+        self.assertIn("Wzor PDF dla {client_name}", page)
+        self.assertNotIn("zastąpiona plikiem PDF", page)
+
+        with self.app.app_context():
+            template = get_db().execute(
+                "SELECT value FROM settings WHERE key = 'contract_template_text'",
+            ).fetchone()
+            self.assertIn("Wzor PDF dla {client_name}", template["value"])
+            self.assertIn("Do splaty: {total_repayment}", template["value"])
 
     def test_sold_contract_enters_accounting_register(self):
         contract = self._create_contract(issue_date="2026-01-01", term_days="1")

@@ -7,7 +7,7 @@ Pierwsza wersja aplikacji webowej do obsługi lombardu:
 - archiwum umów z filtrami,
 - dodawanie zdjęć przedmiotu zabezpieczenia,
 - generowanie PDF umowy na podstawie dostarczonego wzoru,
-- edycja szablonu treści umowy w aplikacji lub import z pliku TXT/MD z automatycznymi polami, np. `{client_name}`, `{loan_amount}` i `{due_date}`,
+- edycja szablonu treści umowy w aplikacji lub import z pliku TXT/MD/DOCX/PDF z automatycznymi polami, np. `{client_name}`, `{loan_amount}` i `{due_date}`,
 - korekta aktywnych i przeterminowanych umów przed rozliczeniem, z ponownym przeliczeniem terminów oraz kwot,
 - rozliczenie spłaty albo sprzedaży zastawu, z ewidencją CSV dla księgowej, filtrem punktu i okresu oraz zbiorczym oznaczaniem wysłanych umów,
 - zapis kontaktu do księgowej i przygotowanie gotowego e-maila z opisem paczki do wysłania,

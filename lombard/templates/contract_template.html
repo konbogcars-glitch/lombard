@@ -18,10 +18,10 @@
     <label>Treść umowy do PDF
       <textarea name="contract_template" rows="28" spellcheck="false">{{ template_text }}</textarea>
     </label>
-    <label>Wczytaj gotowy wzór z pliku TXT/MD
-      <input type="file" name="contract_template_file" accept=".txt,.md,text/plain,text/markdown">
+    <label>Wczytaj gotowy wzór z pliku TXT/MD/DOCX/PDF
+      <input type="file" name="contract_template_file" accept=".txt,.md,.docx,.pdf,text/plain,text/markdown,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/pdf">
     </label>
-    <p class="muted">Jeżeli wybierzesz plik, jego treść zastąpi tekst z pola powyżej przy zapisie szablonu.</p>
+    <p class="muted">Jeżeli wybierzesz plik, jego tekst zastąpi pole powyżej przy zapisie szablonu. Import PDF wyciąga treść tekstową, więc po zapisie warto sprawdzić podział akapitów.</p>
     <div class="actions">
       <button class="button primary">Zapisz szablon</button>
       <button class="button" name="reset_template" value="1" formnovalidate>Przywróć domyślny</button>

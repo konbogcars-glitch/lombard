@@ -45,7 +45,8 @@ from .pdf import (
 
 bp = Blueprint("lombard", __name__)
 ALLOWED_EXTENSIONS = {"jpg", "jpeg", "png", "webp"}
-ALLOWED_TEMPLATE_EXTENSIONS = {"txt", "md"}
+ALLOWED_TEXT_TEMPLATE_EXTENSIONS = {"txt", "md"}
+ALLOWED_TEMPLATE_EXTENSIONS = ALLOWED_TEXT_TEMPLATE_EXTENSIONS | {"docx", "pdf"}
 ACCOUNTANT_EMAIL_KEY = "accountant_email"
 ACCOUNTANT_NAME_KEY = "accountant_name"
 CONTRACT_TEMPLATE_KEY = "contract_template_text"
@@ -135,7 +136,7 @@ def _uploaded_contract_template_text(uploaded_file) -> str | None:
 
     extension = uploaded_file.filename.rsplit(".", 1)[-1].lower() if "." in uploaded_file.filename else ""
     if extension not in ALLOWED_TEMPLATE_EXTENSIONS:
-        flash("Pominięto plik szablonu: dozwolone są pliki TXT albo MD.", "warning")
+        flash("Pominięto plik szablonu: dozwolone są pliki TXT, MD, DOCX albo PDF.", "warning")
         return None
 
     payload = uploaded_file.read()
@@ -143,14 +144,85 @@ def _uploaded_contract_template_text(uploaded_file) -> str | None:
         flash("Pominięto pusty plik szablonu umowy.", "warning")
         return None
 
+    try:
+        template_text = _template_text_from_payload(extension, payload)
+    except ValueError as error:
+        flash(str(error), "warning")
+        return None
+
+    if not template_text.strip():
+        flash("Nie znaleziono tekstu w pliku szablonu. Zapisano treść z pola tekstowego.", "warning")
+        return None
+    return template_text
+
+
+def _template_text_from_payload(extension: str, payload: bytes) -> str:
+    if extension in ALLOWED_TEXT_TEMPLATE_EXTENSIONS:
+        return _decode_text_template(payload)
+    if extension == "docx":
+        return _docx_template_text(payload)
+    if extension == "pdf":
+        return _pdf_template_text(payload)
+    raise ValueError("Nieobsługiwany format pliku szablonu umowy.")
+
+
+def _decode_text_template(payload: bytes) -> str:
     for encoding in ("utf-8-sig", "cp1250"):
         try:
             return payload.decode(encoding)
         except UnicodeDecodeError:
             continue
 
-    flash("Nie udało się odczytać pliku szablonu. Zapisano treść z pola tekstowego.", "warning")
-    return None
+    raise ValueError("Nie udało się odczytać pliku szablonu. Zapisano treść z pola tekstowego.")
+
+
+def _docx_template_text(payload: bytes) -> str:
+    try:
+        from docx import Document
+    except ImportError as exc:
+        raise ValueError(
+            "Import DOCX wymaga biblioteki python-docx. Uruchom instalację zależności z requirements.txt."
+        ) from exc
+
+    try:
+        document = Document(io.BytesIO(payload))
+    except Exception as exc:
+        raise ValueError("Nie udało się odczytać pliku DOCX. Zapisano treść z pola tekstowego.") from exc
+
+    parts = [paragraph.text.strip() for paragraph in document.paragraphs if paragraph.text.strip()]
+    for table in document.tables:
+        for row in table.rows:
+            cells = [
+                cell.text.strip().replace("\n", " ")
+                for cell in row.cells
+                if cell.text.strip()
+            ]
+            if cells:
+                parts.append(" | ".join(cells))
+    return "\n\n".join(parts)
+
+
+def _pdf_template_text(payload: bytes) -> str:
+    try:
+        from pypdf import PdfReader
+    except ImportError as exc:
+        raise ValueError(
+            "Import PDF wymaga biblioteki pypdf. Uruchom instalację zależności z requirements.txt."
+        ) from exc
+
+    try:
+        reader = PdfReader(io.BytesIO(payload))
+        if reader.is_encrypted:
+            try:
+                reader.decrypt("")
+            except Exception as exc:
+                raise ValueError("Nie udało się odczytać zaszyfrowanego pliku PDF.") from exc
+        pages = [(page.extract_text() or "").strip() for page in reader.pages]
+    except ValueError:
+        raise
+    except Exception as exc:
+        raise ValueError("Nie udało się odczytać pliku PDF. Zapisano treść z pola tekstowego.") from exc
+    return "\n\n".join(page for page in pages if page)
 
 
 def _money_input(cents: int | None) -> str:
