@@ -40,7 +40,7 @@ class AppFlowTest(unittest.TestCase):
                 "last_name": last_name,
                 "pesel": pesel,
                 "document_type": "Dowód Osobisty",
-                "document_number": f"{pesel[-3:]}ABC",
+                "document_number": f"{pesel}ABC",
                 "phone": "500600700",
                 "email": f"{first_name.lower()}@example.com",
                 "street_address": "ul. Testowa 1",
@@ -134,6 +134,93 @@ class AppFlowTest(unittest.TestCase):
             self.assertEqual(updated["last_name"], "Nowak")
             self.assertEqual(updated["phone"], "700800900")
             self.assertEqual(updated["city"], "Pińczów")
+
+    def test_duplicate_client_submission_reuses_existing_card(self):
+        existing_client_id = self._create_client()
+
+        response = self.client.post(
+            "/clients",
+            data={
+                "first_name": "Adam",
+                "last_name": "Zdublowany",
+                "pesel": "90010112345",
+                "document_type": "Dowód Osobisty",
+                "document_number": "999ABC",
+                "phone": "111222333",
+                "email": "adam@example.com",
+                "street_address": "ul. Inna 2",
+                "postal_code": "28-100",
+                "city": "Busko-Zdrój",
+                "notes": "",
+            },
+            follow_redirects=True,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        page = response.get_data(as_text=True)
+        self.assertIn("jest już w kartotece", page)
+        self.assertIn("Jan Kowalski", page)
+        self.assertNotIn("Adam Zdublowany", page)
+
+        with self.app.app_context():
+            db = get_db()
+            client_count = db.execute("SELECT COUNT(*) AS count FROM clients").fetchone()["count"]
+            existing = db.execute(
+                "SELECT first_name, last_name FROM clients WHERE id = ?",
+                (existing_client_id,),
+            ).fetchone()
+            self.assertEqual(client_count, 1)
+            self.assertEqual(existing["first_name"], "Jan")
+            self.assertEqual(existing["last_name"], "Kowalski")
+
+    def test_client_edit_cannot_take_existing_identity(self):
+        first_client_id = self._create_client(
+            first_name="Jan",
+            last_name="Kowalski",
+            pesel="90010112345",
+        )
+        second_client_id = self._create_client(
+            first_name="Ewa",
+            last_name="Nowak",
+            pesel="91010112345",
+        )
+
+        response = self.client.post(
+            f"/clients/{second_client_id}/edit",
+            data={
+                "first_name": "Ewa",
+                "last_name": "Nowak",
+                "pesel": "90010112345",
+                "document_type": "Dowód Osobisty",
+                "document_number": "XYZ987654",
+                "phone": "700800900",
+                "email": "ewa.nowak@example.com",
+                "street_address": "ul. Poprawiona 2",
+                "postal_code": "28-400",
+                "city": "Pińczów",
+                "notes": "Próba duplikatu.",
+            },
+            follow_redirects=True,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        page = response.get_data(as_text=True)
+        self.assertIn("Nie zapisano zmian", page)
+        self.assertIn("Jan Kowalski", page)
+
+        with self.app.app_context():
+            rows = get_db().execute(
+                """
+                SELECT id, pesel
+                FROM clients
+                WHERE id IN (?, ?)
+                ORDER BY id
+                """,
+                (first_client_id, second_client_id),
+            ).fetchall()
+            by_id = {row["id"]: row["pesel"] for row in rows}
+            self.assertEqual(by_id[first_client_id], "90010112345")
+            self.assertEqual(by_id[second_client_id], "91010112345")
 
     def test_client_contract_pdf_settlement_and_accounting_export(self):
         response = self.client.post(
@@ -303,6 +390,50 @@ class AppFlowTest(unittest.TestCase):
             self.assertEqual(file_response.get_data(), b"inline image bytes")
         finally:
             file_response.close()
+
+    def test_contract_form_reuses_client_when_new_client_identity_exists(self):
+        existing_client_id = self._create_client()
+
+        response = self.client.post(
+            "/contracts/new",
+            data={
+                "branch_id": self._branch_id("BUS"),
+                "client_mode": "new",
+                "new_client_first_name": "Jan",
+                "new_client_last_name": "Powtórzony",
+                "new_client_pesel": "90010112345",
+                "new_client_document_type": "Dowód Osobisty",
+                "new_client_document_number": "DUP123",
+                "new_client_phone": "501502503",
+                "new_client_email": "jan.duplicate@example.com",
+                "new_client_street_address": "ul. Duplikat 9",
+                "new_client_postal_code": "28-100",
+                "new_client_city": "Busko-Zdrój",
+                "new_client_notes": "",
+                "issue_date": "2026-04-01",
+                "loan_amount": "1500,00",
+                "commission_amount": "",
+                "commission_rate": "10",
+                "term_days": "14",
+                "collateral_type": "biżuteria",
+                "collateral_description": "Łańcuszek złoty próba 585",
+                "collateral_value": "2200,00",
+                "valuation_basis": "oględziny i waga przedmiotu",
+            },
+            follow_redirects=True,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        page = response.get_data(as_text=True)
+        self.assertIn("Wykryto istniejącą kartotekę klienta Jan Kowalski", page)
+        self.assertIn("Umowa BUS/2026/0001", page)
+
+        with self.app.app_context():
+            db = get_db()
+            client_count = db.execute("SELECT COUNT(*) AS count FROM clients").fetchone()["count"]
+            contract = db.execute("SELECT client_id FROM contracts").fetchone()
+            self.assertEqual(client_count, 1)
+            self.assertEqual(contract["client_id"], existing_client_id)
 
     def test_overdue_status_and_accounting_transitions_are_guarded(self):
         contract = self._create_contract(issue_date="2025-01-01", term_days="1")

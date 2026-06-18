@@ -246,6 +246,52 @@ def _form_value(name: str, *, prefix: str = "") -> str:
     return request.form.get(f"{prefix}{name}", "").strip()
 
 
+def _normalize_identity(value: str) -> str:
+    return "".join(value.split()).upper()
+
+
+def _client_name(client: dict) -> str:
+    return f"{client['first_name']} {client['last_name']}"
+
+
+def _find_existing_client_from_form(
+    *,
+    db,
+    prefix: str = "",
+    exclude_client_id: int | None = None,
+) -> dict | None:
+    clauses = []
+    params: list[int | str] = []
+    pesel = _normalize_identity(_form_value("pesel", prefix=prefix))
+    document_number = _normalize_identity(_form_value("document_number", prefix=prefix))
+
+    if pesel:
+        clauses.append("REPLACE(pesel, ' ', '') = ?")
+        params.append(pesel)
+    if document_number:
+        clauses.append("UPPER(REPLACE(document_number, ' ', '')) = ?")
+        params.append(document_number)
+    if not clauses:
+        return None
+
+    exclude_clause = ""
+    if exclude_client_id is not None:
+        exclude_clause = "AND id != ?"
+        params.append(exclude_client_id)
+
+    return db.execute(
+        f"""
+        SELECT *
+        FROM clients
+        WHERE ({' OR '.join(clauses)})
+        {exclude_clause}
+        ORDER BY updated_at DESC, id DESC
+        LIMIT 1
+        """,
+        tuple(params),
+    ).fetchone()
+
+
 def _insert_client_from_form(*, db, prefix: str = "") -> int:
     cursor = db.execute(
         """
@@ -394,6 +440,15 @@ def dashboard() -> str:
 def clients() -> str | Response:
     db = get_db()
     if request.method == "POST":
+        existing_client = _find_existing_client_from_form(db=db)
+        if existing_client is not None:
+            flash(
+                f"Klient {_client_name(existing_client)} jest już w kartotece. "
+                "Otworzono istniejącą kartę zamiast tworzyć duplikat.",
+                "warning",
+            )
+            return redirect(url_for("lombard.client_detail", client_id=existing_client["id"]))
+
         _insert_client_from_form(db=db)
         db.commit()
         flash("Dodano klienta do kartoteki.", "success")
@@ -445,7 +500,20 @@ def client_detail(client_id: int) -> str:
 def client_edit(client_id: int) -> str | Response:
     client = _client_or_404(client_id)
     if request.method == "POST":
-        get_db().execute(
+        db = get_db()
+        existing_client = _find_existing_client_from_form(
+            db=db,
+            exclude_client_id=client_id,
+        )
+        if existing_client is not None:
+            flash(
+                f"PESEL lub numer dokumentu należy już do klienta {_client_name(existing_client)}. "
+                "Nie zapisano zmian, aby nie połączyć dwóch kartotek.",
+                "warning",
+            )
+            return redirect(url_for("lombard.client_detail", client_id=existing_client["id"]))
+
+        db.execute(
             """
             UPDATE clients
             SET first_name = ?,
@@ -477,7 +545,7 @@ def client_edit(client_id: int) -> str | Response:
                 client_id,
             ),
         )
-        get_db().commit()
+        db.commit()
         flash("Zaktualizowano dane klienta w kartotece.", "success")
         return redirect(url_for("lombard.client_detail", client_id=client_id))
 
@@ -498,11 +566,20 @@ def contract_new() -> str | Response:
         client_mode = request.form.get("client_mode") or (
             "existing" if request.form.get("client_id") else "new"
         )
-        client_id = (
-            _insert_client_from_form(db=db, prefix="new_client_")
-            if client_mode == "new"
-            else int(request.form["client_id"])
-        )
+        reused_existing_client = None
+        created_new_client = False
+        if client_mode == "new":
+            reused_existing_client = _find_existing_client_from_form(
+                db=db,
+                prefix="new_client_",
+            )
+            if reused_existing_client is not None:
+                client_id = reused_existing_client["id"]
+            else:
+                client_id = _insert_client_from_form(db=db, prefix="new_client_")
+                created_new_client = True
+        else:
+            client_id = int(request.form["client_id"])
         loan_amount_cents = money_to_cents(request.form["loan_amount"])
         commission_raw = request.form.get("commission_amount", "").strip()
         commission_amount_cents = money_to_cents(commission_raw) if commission_raw else None
@@ -555,8 +632,14 @@ def contract_new() -> str | Response:
             caption=request.form.get("photo_caption", "").strip(),
         )
         db.commit()
-        if client_mode == "new":
+        if created_new_client:
             flash("Dodano klienta do kartoteki.", "success")
+        elif reused_existing_client is not None:
+            flash(
+                f"Wykryto istniejącą kartotekę klienta {_client_name(reused_existing_client)}. "
+                "Nowa umowa została podpięta do tej karty.",
+                "warning",
+            )
         if saved_photos:
             flash(f"Utworzono umowę i dodano zdjęcia: {saved_photos}.", "success")
         else:
