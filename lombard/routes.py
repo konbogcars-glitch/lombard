@@ -482,6 +482,59 @@ def dashboard() -> str:
     )
 
 
+def _branch_workload_rows() -> list[dict]:
+    return query_all(
+        """
+        SELECT
+            branches.*,
+            COUNT(contracts.id) AS contracts_total,
+            COUNT(DISTINCT contracts.client_id) AS clients_count,
+            COALESCE(SUM(CASE WHEN contracts.status IN ('active', 'expired') THEN 1 ELSE 0 END), 0) AS open_count,
+            COALESCE(SUM(CASE WHEN contracts.status = 'expired' THEN 1 ELSE 0 END), 0) AS expired_count,
+            COALESCE(SUM(
+                CASE
+                    WHEN contracts.status IN ('settled', 'sold')
+                         AND contracts.accountant_sent_at IS NULL
+                    THEN 1
+                    ELSE 0
+                END
+            ), 0) AS accounting_pending_count,
+            COALESCE(SUM(
+                CASE
+                    WHEN contracts.status IN ('active', 'expired')
+                    THEN contracts.loan_amount_cents
+                    ELSE 0
+                END
+            ), 0) AS open_loan_cents
+        FROM branches
+        LEFT JOIN contracts ON contracts.branch_id = branches.id
+        GROUP BY branches.id
+        ORDER BY branches.id
+        """
+    )
+
+
+@bp.route("/branches")
+def branches() -> str:
+    _refresh_overdue_contracts()
+    totals = query_one(
+        """
+        SELECT
+            (SELECT COUNT(*) FROM clients) AS clients_total,
+            (SELECT COUNT(*) FROM contracts) AS contracts_total,
+            (SELECT COUNT(*)
+             FROM contracts
+             WHERE status IN ('settled', 'sold')
+               AND accountant_sent_at IS NULL) AS accounting_pending_total
+        """
+    )
+    return render_template(
+        "branches.html",
+        branches=_branch_workload_rows(),
+        totals=totals,
+    )
+
+
 @bp.route("/clients", methods=["GET", "POST"])
 def clients() -> str | Response:
     db = get_db()

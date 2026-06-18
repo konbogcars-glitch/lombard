@@ -792,6 +792,68 @@ class AppFlowTest(unittest.TestCase):
         self.assertIn(chm_contract["contract_number"], all_dashboard)
         self.assertIn(bus_contract["contract_number"], all_dashboard)
 
+    def test_branch_overview_shows_shared_workload_and_shortcuts(self):
+        bus_contract = self._create_contract(branch_code="BUS", issue_date="2026-12-01")
+        chm_client = self._create_client(first_name="Ewa", pesel="82010112345")
+        chm_contract = self._create_contract(
+            branch_code="CHM",
+            client_id=chm_client,
+            issue_date="2025-01-01",
+            term_days="1",
+        )
+        pin_client = self._create_client(first_name="Maria", pesel="83010112345")
+        pin_contract = self._create_contract(
+            branch_code="PIN",
+            client_id=pin_client,
+            issue_date="2026-03-01",
+        )
+
+        settle_response = self.client.post(
+            f"/contracts/{pin_contract['id']}/settle",
+            data={"payment_date": "2026-03-07", "paid_amount": ""},
+            follow_redirects=True,
+        )
+        self.assertEqual(settle_response.status_code, 200)
+
+        response = self.client.get("/branches")
+        self.assertEqual(response.status_code, 200)
+        page = response.get_data(as_text=True)
+
+        self.assertIn("Punkty lombardu", page)
+        self.assertIn("Busko-Zdrój", page)
+        self.assertIn("Chmielnik", page)
+        self.assertIn("Pińczów", page)
+        self.assertIn("Klienci w kartotece", page)
+        self.assertIn("Do księgowej", page)
+
+        bus_branch_id = self._branch_id("BUS")
+        chm_branch_id = self._branch_id("CHM")
+        pin_branch_id = self._branch_id("PIN")
+        self.assertIn(f'href="/archive?branch_id={bus_branch_id}"', page)
+        self.assertIn(f'href="/accounting?branch_id={pin_branch_id}"', page)
+        self.assertIn(f'href="/?branch_id={chm_branch_id}"', page)
+        self.assertIn(f'href="/contracts/new?branch_id={pin_branch_id}"', page)
+
+        with self.app.app_context():
+            db = get_db()
+            refreshed_chm = db.execute(
+                "SELECT status FROM contracts WHERE id = ?",
+                (chm_contract["id"],),
+            ).fetchone()
+            pending_accounting = db.execute(
+                """
+                SELECT COUNT(*) AS count
+                FROM contracts
+                WHERE branch_id = ?
+                  AND status IN ('settled', 'sold')
+                  AND accountant_sent_at IS NULL
+                """,
+                (pin_branch_id,),
+            ).fetchone()
+            self.assertEqual(refreshed_chm["status"], "expired")
+            self.assertEqual(pending_accounting["count"], 1)
+            self.assertIsNotNone(bus_contract)
+
     def test_accounting_package_contains_csv_and_contract_pdf(self):
         contract = self._create_contract(issue_date="2026-05-01")
         settle_response = self.client.post(

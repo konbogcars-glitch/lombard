@@ -372,6 +372,46 @@ button:hover {
   margin-bottom: 4px;
 }
 
+.branch-grid {
+  display: grid;
+  gap: 18px;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+}
+
+.branch-card {
+  display: grid;
+  gap: 14px;
+}
+
+.branch-metrics {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin: 0;
+}
+
+.branch-metrics div {
+  background: #f8fbff;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 10px;
+}
+
+.branch-metrics dt {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.branch-metrics dd {
+  font-size: 20px;
+  font-weight: 700;
+  margin: 4px 0 0;
+}
+
+.branch-actions {
+  flex-wrap: wrap;
+}
+
 .details {
   display: grid;
   grid-template-columns: 190px minmax(0, 1fr);
