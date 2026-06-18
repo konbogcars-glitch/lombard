@@ -7,7 +7,7 @@ Pierwsza wersja aplikacji webowej do obsługi lombardu:
 - archiwum umów z filtrami,
 - dodawanie zdjęć przedmiotu zabezpieczenia,
 - generowanie PDF umowy na podstawie dostarczonego wzoru,
-- rozliczenie spłaty i ewidencja CSV dla księgowej z filtrem punktu oraz zbiorczym oznaczaniem wysłanych umów,
+- rozliczenie spłaty albo sprzedaży zastawu, z ewidencją CSV dla księgowej, filtrem punktu oraz zbiorczym oznaczaniem wysłanych umów,
 - wybór aktywnego punktu pracy w nagłówku, z możliwością przełączenia na wspólny widok wszystkich lokalizacji,
 - paczka ZIP dla księgowej zawierająca ewidencję CSV oraz PDF-y spłaconych umów gotowe do wysłania,
 - automatyczne oznaczanie umów po terminie oraz blokady ponownego księgowania.
@@ -45,5 +45,5 @@ To jest działający fundament systemu. Przed produkcyjnym wdrożeniem warto dod
 - logowanie i uprawnienia pracowników dla każdego punktu,
 - kopie zapasowe bazy i zdjęć,
 - szyfrowanie/ochronę danych osobowych zgodnie z RODO,
-- możliwość edycji danych klienta i korekt umowy,
+- korekty utworzonych umów po ich wystawieniu,
 - integrację mailową lub automatyczne wysyłanie ewidencji do księgowej.

@@ -2,7 +2,12 @@ from datetime import date
 from decimal import Decimal
 import unittest
 
-from lombard.calculations import calculate_loan, money_to_words, repayment_amount_on
+from lombard.calculations import (
+    calculate_loan,
+    calculate_sale_realization,
+    money_to_words,
+    repayment_amount_on,
+)
 
 
 class LoanCalculationTest(unittest.TestCase):
@@ -47,6 +52,20 @@ class LoanCalculationTest(unittest.TestCase):
             money_to_words(220_000),
             "dwa tysiące dwieście złotych i zero groszy",
         )
+
+    def test_sale_realization_tracks_surplus_return(self):
+        result = calculate_sale_realization(
+            base_total_cents=100_000,
+            due_date=date(2026, 1, 7),
+            realization_date=date(2026, 1, 10),
+            sale_amount_cents=150_000,
+        )
+
+        self.assertEqual(result.amount_due_cents, 103_000)
+        self.assertEqual(result.surplus_cents, 47_000)
+        self.assertEqual(result.surplus_fee_cents, 9_400)
+        self.assertEqual(result.surplus_return_cents, 37_600)
+        self.assertEqual(result.shortfall_cents, 0)
 
 
 if __name__ == "__main__":

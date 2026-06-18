@@ -5,7 +5,7 @@
   <div class="panel-heading">
     <div>
       <h1>Ewidencja dla księgowej</h1>
-      <p class="muted">Po spłacie umowy wyeksportuj CSV i oznacz wysłane pozycje jako zaksięgowane.</p>
+      <p class="muted">Po spłacie albo sprzedaży zabezpieczenia wyeksportuj CSV i oznacz wysłane pozycje jako zaksięgowane.</p>
     </div>
     <div class="actions">
       {% set branch_export = selected_branch_id if selected_branch_id else ('all' if showing_all_branches else none) %}
@@ -33,7 +33,7 @@
       <label>Notatka zbiorcza
         <input name="accounting_note" placeholder="np. CSV wysłany mailem do księgowej">
       </label>
-      <button class="button">Oznacz spłacone z tego filtra jako wysłane</button>
+      <button class="button">Oznacz pozycje z tego filtra jako wysłane</button>
     </form>
 
     <table>
@@ -42,8 +42,9 @@
           <th>Nr</th>
           <th>Klient</th>
           <th>Punkt</th>
-          <th>Spłata</th>
+          <th>Realizacja</th>
           <th>Kwota</th>
+          <th>Zwrot</th>
           <th>Status</th>
           <th>Księgowa</th>
           <th></th>
@@ -55,13 +56,20 @@
             <td>{{ contract.contract_number }}</td>
             <td>{{ contract.first_name }} {{ contract.last_name }}</td>
             <td>{{ contract.branch_city }}</td>
-            <td>{{ contract.payment_date|date_pl }}</td>
-            <td>{{ contract.paid_amount_cents|money }}</td>
+            <td>
+              {% if contract.realization_date %}
+                sprzedaż · {{ contract.realization_date|date_pl }}
+              {% else %}
+                spłata · {{ contract.payment_date|date_pl }}
+              {% endif %}
+            </td>
+            <td>{{ (contract.sale_amount_cents if contract.realization_date else contract.paid_amount_cents)|money }}</td>
+            <td>{{ contract.surplus_return_cents|money if contract.realization_date else "-" }}</td>
             <td><span class="status">{{ contract.status|status_label }}</span></td>
             <td>{{ contract.accountant_sent_at or "do wysłania" }}</td>
             <td>
               <a href="{{ url_for('lombard.contract_detail', contract_id=contract.id) }}">Otwórz</a>
-              {% if contract.status == "settled" %}
+              {% if contract.status in ["settled", "sold"] %}
                 <form method="post" action="{{ url_for('lombard.contract_account', contract_id=contract.id) }}" class="table-form">
                   <button class="link-button">Oznacz wysłaną</button>
                 </form>
@@ -72,7 +80,7 @@
       </tbody>
     </table>
   {% else %}
-    <p class="empty">Brak spłaconych umów do księgowania.</p>
+    <p class="empty">Brak spłaconych lub zrealizowanych umów do księgowania.</p>
   {% endif %}
 </section>
 {% endblock %}

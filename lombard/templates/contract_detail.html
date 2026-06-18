@@ -48,15 +48,32 @@
         <label>Kwota spłacona <input name="paid_amount" placeholder="{{ expected_payment|money }}"></label>
         <button class="button primary">Oznacz jako spłaconą</button>
       </form>
+      <hr>
+      <h3>Realizacja przez sprzedaż zabezpieczenia</h3>
+      <p class="muted">Użyj, gdy klient nie odda pieniędzy, a przedmiot zabezpieczenia został sprzedany.</p>
+      <form method="post" action="{{ url_for('lombard.contract_realize', contract_id=contract.id) }}" class="form">
+        <label>Data sprzedaży <input type="date" name="realization_date" value="{{ today.isoformat() }}" required></label>
+        <label>Kwota sprzedaży <input name="sale_amount" placeholder="0,00" required></label>
+        <label>Notatka dla księgowej <textarea name="realization_note" rows="3" placeholder="np. sprzedaż bezpośrednia, nr paragonu/faktury"></textarea></label>
+        <button class="button">Oznacz jako sprzedaną</button>
+      </form>
     {% else %}
       <dl class="details">
-        <dt>Data spłaty</dt><dd>{{ contract.payment_date|date_pl }}</dd>
-        <dt>Kwota spłacona</dt><dd>{{ contract.paid_amount_cents|money }}</dd>
+        {% if contract.realization_date %}
+          <dt>Data sprzedaży</dt><dd>{{ contract.realization_date|date_pl }}</dd>
+          <dt>Należność</dt><dd>{{ contract.realization_due_cents|money }}</dd>
+          <dt>Kwota sprzedaży</dt><dd>{{ contract.sale_amount_cents|money }}</dd>
+          <dt>Zwrot nadwyżki</dt><dd>{{ contract.surplus_return_cents|money }}</dd>
+          <dt>Notatka realizacji</dt><dd>{{ contract.realization_note or "-" }}</dd>
+        {% else %}
+          <dt>Data spłaty</dt><dd>{{ contract.payment_date|date_pl }}</dd>
+          <dt>Kwota spłacona</dt><dd>{{ contract.paid_amount_cents|money }}</dd>
+        {% endif %}
         <dt>Księgowanie</dt><dd>{{ contract.accountant_sent_at or "oczekuje" }}</dd>
       </dl>
     {% endif %}
 
-    {% if contract.status == "settled" %}
+    {% if contract.status in ["settled", "sold"] %}
       <form method="post" action="{{ url_for('lombard.contract_account', contract_id=contract.id) }}" class="form">
         <label>Notatka dla księgowej <textarea name="accounting_note" rows="3"></textarea></label>
         <button class="button">Oznacz jako wysłaną do księgowej</button>

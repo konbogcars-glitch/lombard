@@ -25,6 +25,7 @@ from flask import (
 from werkzeug.utils import secure_filename
 
 from .calculations import (
+    calculate_sale_realization,
     calculate_loan,
     cents_to_money,
     format_money,
@@ -176,8 +177,8 @@ def dashboard() -> str:
         SELECT
             COUNT(*) AS contracts_total,
             SUM(CASE WHEN status = 'active' THEN 1 ELSE 0 END) AS active_count,
-            SUM(CASE WHEN status IN ('settled', 'accounted') THEN 1 ELSE 0 END) AS settled_count,
-            SUM(CASE WHEN status = 'settled' AND accountant_sent_at IS NULL THEN 1 ELSE 0 END) AS accounting_pending
+            SUM(CASE WHEN status IN ('settled', 'sold', 'accounted') THEN 1 ELSE 0 END) AS settled_count,
+            SUM(CASE WHEN status IN ('settled', 'sold') AND accountant_sent_at IS NULL THEN 1 ELSE 0 END) AS accounting_pending
         FROM contracts
         {branch_clause}
         """,
@@ -487,14 +488,56 @@ def contract_settle(contract_id: int) -> Response:
     return redirect(url_for("lombard.contract_detail", contract_id=contract_id))
 
 
+@bp.route("/contracts/<int:contract_id>/realize", methods=["POST"])
+def contract_realize(contract_id: int) -> Response:
+    _refresh_overdue_contracts()
+    contract = _contract_or_404(contract_id)
+    if contract["status"] not in {"active", "expired"}:
+        flash("Tę umowę już rozliczono albo przekazano do księgowości.", "warning")
+        return redirect(url_for("lombard.contract_detail", contract_id=contract_id))
+
+    realization_date = _parse_date(request.form["realization_date"])
+    sale_amount = money_to_cents(request.form["sale_amount"])
+    calculation = calculate_sale_realization(
+        base_total_cents=contract["total_repayment_cents"],
+        due_date=_parse_date(contract["due_date"]),
+        realization_date=realization_date,
+        sale_amount_cents=sale_amount,
+    )
+    get_db().execute(
+        """
+        UPDATE contracts
+        SET status = 'sold',
+            realization_date = ?,
+            sale_amount_cents = ?,
+            realization_due_cents = ?,
+            surplus_return_cents = ?,
+            realization_note = ?,
+            updated_at = CURRENT_TIMESTAMP
+        WHERE id = ?
+        """,
+        (
+            realization_date.isoformat(),
+            calculation.sale_amount_cents,
+            calculation.amount_due_cents,
+            calculation.surplus_return_cents,
+            request.form.get("realization_note", "").strip(),
+            contract_id,
+        ),
+    )
+    get_db().commit()
+    flash("Umowa została zrealizowana przez sprzedaż zabezpieczenia i czeka na księgowanie.", "success")
+    return redirect(url_for("lombard.contract_detail", contract_id=contract_id))
+
+
 @bp.route("/contracts/<int:contract_id>/account", methods=["POST"])
 def contract_account(contract_id: int) -> Response:
     contract = _contract_or_404(contract_id)
     if contract["status"] == "accounted":
         flash("Ta umowa jest już oznaczona jako wysłana do księgowej.", "warning")
         return redirect(url_for("lombard.accounting"))
-    if contract["status"] != "settled":
-        flash("Do księgowości można przekazać tylko spłaconą umowę.", "warning")
+    if contract["status"] not in {"settled", "sold"}:
+        flash("Do księgowości można przekazać tylko spłaconą albo zrealizowaną umowę.", "warning")
         return redirect(url_for("lombard.contract_detail", contract_id=contract_id))
 
     now = datetime.now().isoformat(timespec="seconds")
@@ -535,7 +578,7 @@ def accounting_bulk_account() -> Response:
             accountant_sent_at = ?,
             accounting_note = ?,
             updated_at = CURRENT_TIMESTAMP
-        WHERE status = 'settled'
+        WHERE status IN ('settled', 'sold')
         {branch_clause}
         """,
         tuple(params),
@@ -545,7 +588,7 @@ def accounting_bulk_account() -> Response:
     if cursor.rowcount:
         flash(f"Oznaczono jako wysłane do księgowej: {cursor.rowcount}.", "success")
     else:
-        flash("Brak spłaconych umów do oznaczenia dla wybranego filtra.", "warning")
+        flash("Brak spłaconych lub zrealizowanych umów do oznaczenia dla wybranego filtra.", "warning")
     return redirect(url_for("lombard.accounting", branch_id=branch_id) if branch_id else url_for("lombard.accounting"))
 
 
@@ -616,9 +659,9 @@ def accounting() -> str:
         FROM contracts
         JOIN clients ON clients.id = contracts.client_id
         JOIN branches ON branches.id = contracts.branch_id
-        WHERE contracts.status IN ('settled', 'accounted')
+        WHERE contracts.status IN ('settled', 'sold', 'accounted')
         {branch_clause}
-        ORDER BY contracts.payment_date DESC, contracts.id DESC
+        ORDER BY COALESCE(contracts.payment_date, contracts.realization_date) DESC, contracts.id DESC
         """,
         tuple(params),
     )
@@ -634,7 +677,9 @@ def accounting() -> str:
 
 def _accounting_rows(*, branch_id: int | None, include_sent: bool) -> list[dict]:
     clauses = [
-        "contracts.status IN ('settled', 'accounted')" if include_sent else "contracts.status = 'settled'"
+        "contracts.status IN ('settled', 'sold', 'accounted')"
+        if include_sent
+        else "contracts.status IN ('settled', 'sold')"
     ]
     params: list[int] = []
     if branch_id:
@@ -648,7 +693,7 @@ def _accounting_rows(*, branch_id: int | None, include_sent: bool) -> list[dict]
         JOIN clients ON clients.id = contracts.client_id
         JOIN branches ON branches.id = contracts.branch_id
         WHERE {where}
-        ORDER BY contracts.payment_date DESC, contracts.id DESC
+        ORDER BY COALESCE(contracts.payment_date, contracts.realization_date) DESC, contracts.id DESC
         """,
         tuple(params),
     )
@@ -664,14 +709,21 @@ def _accounting_csv(rows: list[dict]) -> str:
             "Klient",
             "PESEL",
             "Data umowy",
-            "Data spłaty",
+            "Rodzaj realizacji",
+            "Data realizacji",
             "Kwota pożyczki",
             "Prowizja",
-            "Kwota spłacona",
+            "Należność",
+            "Kwota zrealizowana",
+            "Zwrot nadwyżki klientowi",
             "Status",
+            "Notatka",
         ]
     )
     for row in rows:
+        is_sale = bool(row.get("realization_date"))
+        realized_amount = row["sale_amount_cents"] if is_sale else row["paid_amount_cents"]
+        realization_date = row["realization_date"] if is_sale else row["payment_date"]
         writer.writerow(
             [
                 row["contract_number"],
@@ -679,11 +731,15 @@ def _accounting_csv(rows: list[dict]) -> str:
                 f"{row['first_name']} {row['last_name']}",
                 row["pesel"] or "",
                 row["issue_date"],
-                row["payment_date"] or "",
+                "sprzedaż zabezpieczenia" if is_sale else "spłata klienta",
+                realization_date or "",
                 format_money(row["loan_amount_cents"]),
                 format_money(row["commission_amount_cents"]),
-                format_money(row["paid_amount_cents"]),
+                format_money(row["realization_due_cents"] if is_sale else row["total_repayment_cents"]),
+                format_money(realized_amount),
+                format_money(row["surplus_return_cents"]) if is_sale else "",
                 row["status"],
+                row["realization_note"] if is_sale else row["accounting_note"] or "",
             ]
         )
     return "\ufeff" + output.getvalue()

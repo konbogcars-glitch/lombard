@@ -43,6 +43,16 @@ class LoanCalculation:
     sale_mode: str
 
 
+@dataclass(frozen=True)
+class SaleRealization:
+    amount_due_cents: int
+    sale_amount_cents: int
+    surplus_cents: int
+    surplus_fee_cents: int
+    surplus_return_cents: int
+    shortfall_cents: int
+
+
 def calculate_loan(
     *,
     issue_date: date,
@@ -98,6 +108,35 @@ def repayment_amount_on(
     daily = money_to_cents(cents_to_money(base_total_cents) * Decimal("0.01"))
     max_fee = money_to_cents(cents_to_money(base_total_cents) * Decimal("0.20"))
     return base_total_cents + min(days_after_due * daily, max_fee)
+
+
+def calculate_sale_realization(
+    *,
+    base_total_cents: int,
+    due_date: date,
+    realization_date: date,
+    sale_amount_cents: int,
+) -> SaleRealization:
+    if sale_amount_cents < 0:
+        raise ValueError("Kwota sprzedaży nie może być ujemna.")
+
+    amount_due = repayment_amount_on(
+        base_total_cents=base_total_cents,
+        due_date=due_date,
+        payment_date=realization_date,
+    )
+    surplus = max(sale_amount_cents - amount_due, 0)
+    surplus_fee = money_to_cents(cents_to_money(surplus) * Decimal("0.20"))
+    surplus_return = surplus - surplus_fee
+    shortfall = max(amount_due - sale_amount_cents, 0)
+    return SaleRealization(
+        amount_due_cents=amount_due,
+        sale_amount_cents=sale_amount_cents,
+        surplus_cents=surplus,
+        surplus_fee_cents=surplus_fee,
+        surplus_return_cents=surplus_return,
+        shortfall_cents=shortfall,
+    )
 
 
 ONES = [

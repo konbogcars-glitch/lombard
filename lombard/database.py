@@ -58,6 +58,11 @@ CREATE TABLE IF NOT EXISTS contracts (
     status TEXT NOT NULL DEFAULT 'active',
     payment_date TEXT,
     paid_amount_cents INTEGER,
+    realization_date TEXT,
+    sale_amount_cents INTEGER,
+    realization_due_cents INTEGER,
+    surplus_return_cents INTEGER,
+    realization_note TEXT,
     accounted_at TEXT,
     accountant_sent_at TEXT,
     accounting_note TEXT,
@@ -88,6 +93,15 @@ BRANCHES = [
 ]
 
 
+CONTRACT_COLUMN_MIGRATIONS = {
+    "realization_date": "TEXT",
+    "sale_amount_cents": "INTEGER",
+    "realization_due_cents": "INTEGER",
+    "surplus_return_cents": "INTEGER",
+    "realization_note": "TEXT",
+}
+
+
 def dict_factory(cursor: sqlite3.Cursor, row: sqlite3.Row) -> dict:
     return {column[0]: row[index] for index, column in enumerate(cursor.description)}
 
@@ -112,6 +126,7 @@ def close_db(_: object | None = None) -> None:
 def init_db() -> None:
     db = get_db()
     db.executescript(SCHEMA)
+    _ensure_contract_columns(db)
     db.executemany(
         """
         INSERT INTO branches(code, name, city, address)
@@ -124,6 +139,16 @@ def init_db() -> None:
         BRANCHES,
     )
     db.commit()
+
+
+def _ensure_contract_columns(db: sqlite3.Connection) -> None:
+    existing_columns = {
+        row["name"]
+        for row in db.execute("PRAGMA table_info(contracts)").fetchall()
+    }
+    for column_name, column_type in CONTRACT_COLUMN_MIGRATIONS.items():
+        if column_name not in existing_columns:
+            db.execute(f"ALTER TABLE contracts ADD COLUMN {column_name} {column_type}")
 
 
 def next_contract_number(branch_id: int, issue_year: int) -> str:

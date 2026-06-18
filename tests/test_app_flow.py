@@ -430,6 +430,58 @@ class AppFlowTest(unittest.TestCase):
             csv_data = archive.read("ewidencja_ksiegowa.csv").decode("utf-8-sig")
             self.assertIn(contract["contract_number"], csv_data)
 
+    def test_sold_contract_enters_accounting_register(self):
+        contract = self._create_contract(issue_date="2026-01-01", term_days="1")
+
+        response = self.client.post(
+            f"/contracts/{contract['id']}/realize",
+            data={
+                "realization_date": "2026-02-01",
+                "sale_amount": "3000,00",
+                "realization_note": "sprzedaż bezpośrednia",
+            },
+            follow_redirects=True,
+        )
+        self.assertEqual(response.status_code, 200)
+        detail_page = response.get_data(as_text=True)
+        self.assertIn("Kwota sprzedaży", detail_page)
+        self.assertIn("3 000,00 zł", detail_page)
+
+        with self.app.app_context():
+            sold = get_db().execute(
+                """
+                SELECT status, sale_amount_cents, realization_due_cents, surplus_return_cents
+                FROM contracts
+                WHERE id = ?
+                """,
+                (contract["id"],),
+            ).fetchone()
+            self.assertEqual(sold["status"], "sold")
+            self.assertEqual(sold["sale_amount_cents"], 300_000)
+            self.assertEqual(sold["realization_due_cents"], 264_000)
+            self.assertEqual(sold["surplus_return_cents"], 28_800)
+
+        csv_response = self.client.get("/accounting/export.csv")
+        self.assertEqual(csv_response.status_code, 200)
+        csv_data = csv_response.get_data(as_text=True)
+        self.assertIn(contract["contract_number"], csv_data)
+        self.assertIn("sprzedaż zabezpieczenia", csv_data)
+        self.assertIn("288,00 zł", csv_data)
+
+        account_response = self.client.post(
+            f"/contracts/{contract['id']}/account",
+            data={"accounting_note": "wysłano sprzedaż"},
+            follow_redirects=True,
+        )
+        self.assertEqual(account_response.status_code, 200)
+        with self.app.app_context():
+            accounted = get_db().execute(
+                "SELECT status, accounting_note FROM contracts WHERE id = ?",
+                (contract["id"],),
+            ).fetchone()
+            self.assertEqual(accounted["status"], "accounted")
+            self.assertEqual(accounted["accounting_note"], "wysłano sprzedaż")
+
 
 if __name__ == "__main__":
     unittest.main()
