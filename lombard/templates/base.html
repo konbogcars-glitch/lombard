@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="pl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}Lombard{% endblock %}</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+  <header class="topbar">
+    <div>
+      <strong>Lombard</strong>
+      <span class="muted">Busko-Zdrój · Chmielnik · Pińczów</span>
+    </div>
+    <form method="post" action="{{ url_for('lombard.set_branch_context') }}" class="branch-context">
+      <input type="hidden" name="next" value="{{ request.full_path if request.query_string else request.path }}">
+      <label>
+        Aktywny punkt
+        <select name="branch_id" onchange="this.form.submit()">
+          <option value="" {% if not current_branch_id %}selected{% endif %}>Wszystkie punkty</option>
+          {% for branch in branch_options %}
+            <option value="{{ branch.id }}" {% if current_branch_id == branch.id %}selected{% endif %}>
+              {{ branch.city }}
+            </option>
+          {% endfor %}
+        </select>
+      </label>
+      <noscript><button>Ustaw</button></noscript>
+    </form>
+    <nav>
+      <a href="{{ url_for('lombard.dashboard') }}">Panel</a>
+      <a href="{{ url_for('lombard.clients') }}">Klienci</a>
+      <a href="{{ url_for('lombard.contract_new') }}">Nowa umowa</a>
+      <a href="{{ url_for('lombard.archive') }}">Archiwum</a>
+      <a href="{{ url_for('lombard.accounting') }}">Księgowość</a>
+    </nav>
+  </header>
+  <main class="container">
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% if messages %}
+        <section class="messages">
+          {% for category, message in messages %}
+            <div class="message {{ category }}">{{ message }}</div>
+          {% endfor %}
+        </section>
+      {% endif %}
+    {% endwith %}
+    {% block content %}{% endblock %}
+  </main>
+</body>
+</html>
