@@ -45,6 +45,7 @@
           <th>Realizacja</th>
           <th>Kwota</th>
           <th>Zwrot</th>
+          <th>Niedobór</th>
           <th>Status</th>
           <th>Księgowa</th>
           <th></th>
@@ -65,6 +66,7 @@
             </td>
             <td>{{ (contract.sale_amount_cents if contract.realization_date else contract.paid_amount_cents)|money }}</td>
             <td>{{ contract.surplus_return_cents|money if contract.realization_date else "-" }}</td>
+            <td>{{ contract.shortfall_cents|money if contract.realization_date else "-" }}</td>
             <td><span class="status">{{ contract.status|status_label }}</span></td>
             <td>{{ contract.accountant_sent_at or "do wysłania" }}</td>
             <td>

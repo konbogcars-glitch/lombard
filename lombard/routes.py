@@ -512,6 +512,7 @@ def contract_realize(contract_id: int) -> Response:
             sale_amount_cents = ?,
             realization_due_cents = ?,
             surplus_return_cents = ?,
+            shortfall_cents = ?,
             realization_note = ?,
             updated_at = CURRENT_TIMESTAMP
         WHERE id = ?
@@ -521,6 +522,7 @@ def contract_realize(contract_id: int) -> Response:
             calculation.sale_amount_cents,
             calculation.amount_due_cents,
             calculation.surplus_return_cents,
+            calculation.shortfall_cents,
             request.form.get("realization_note", "").strip(),
             contract_id,
         ),
@@ -716,6 +718,7 @@ def _accounting_csv(rows: list[dict]) -> str:
             "Należność",
             "Kwota zrealizowana",
             "Zwrot nadwyżki klientowi",
+            "Niedobór po sprzedaży",
             "Status",
             "Notatka",
         ]
@@ -738,6 +741,7 @@ def _accounting_csv(rows: list[dict]) -> str:
                 format_money(row["realization_due_cents"] if is_sale else row["total_repayment_cents"]),
                 format_money(realized_amount),
                 format_money(row["surplus_return_cents"]) if is_sale else "",
+                format_money(row["shortfall_cents"]) if is_sale else "",
                 row["status"],
                 row["realization_note"] if is_sale else row["accounting_note"] or "",
             ]

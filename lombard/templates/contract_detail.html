@@ -64,6 +64,7 @@
           <dt>Należność</dt><dd>{{ contract.realization_due_cents|money }}</dd>
           <dt>Kwota sprzedaży</dt><dd>{{ contract.sale_amount_cents|money }}</dd>
           <dt>Zwrot nadwyżki</dt><dd>{{ contract.surplus_return_cents|money }}</dd>
+          <dt>Niedobór po sprzedaży</dt><dd>{{ contract.shortfall_cents|money }}</dd>
           <dt>Notatka realizacji</dt><dd>{{ contract.realization_note or "-" }}</dd>
         {% else %}
           <dt>Data spłaty</dt><dd>{{ contract.payment_date|date_pl }}</dd>

@@ -450,7 +450,7 @@ class AppFlowTest(unittest.TestCase):
         with self.app.app_context():
             sold = get_db().execute(
                 """
-                SELECT status, sale_amount_cents, realization_due_cents, surplus_return_cents
+                SELECT status, sale_amount_cents, realization_due_cents, surplus_return_cents, shortfall_cents
                 FROM contracts
                 WHERE id = ?
                 """,
@@ -460,6 +460,7 @@ class AppFlowTest(unittest.TestCase):
             self.assertEqual(sold["sale_amount_cents"], 300_000)
             self.assertEqual(sold["realization_due_cents"], 264_000)
             self.assertEqual(sold["surplus_return_cents"], 28_800)
+            self.assertEqual(sold["shortfall_cents"], 0)
 
         csv_response = self.client.get("/accounting/export.csv")
         self.assertEqual(csv_response.status_code, 200)
@@ -481,6 +482,43 @@ class AppFlowTest(unittest.TestCase):
             ).fetchone()
             self.assertEqual(accounted["status"], "accounted")
             self.assertEqual(accounted["accounting_note"], "wysłano sprzedaż")
+
+    def test_sale_shortfall_is_saved_and_exported_for_accounting(self):
+        contract = self._create_contract(issue_date="2026-01-01", term_days="1")
+
+        response = self.client.post(
+            f"/contracts/{contract['id']}/realize",
+            data={
+                "realization_date": "2026-02-01",
+                "sale_amount": "2000,00",
+                "realization_note": "sprzedaż poniżej należności",
+            },
+            follow_redirects=True,
+        )
+        self.assertEqual(response.status_code, 200)
+        detail_page = response.get_data(as_text=True)
+        self.assertIn("Niedobór po sprzedaży", detail_page)
+        self.assertIn("640,00 zł", detail_page)
+
+        with self.app.app_context():
+            sold = get_db().execute(
+                """
+                SELECT status, realization_due_cents, surplus_return_cents, shortfall_cents
+                FROM contracts
+                WHERE id = ?
+                """,
+                (contract["id"],),
+            ).fetchone()
+            self.assertEqual(sold["status"], "sold")
+            self.assertEqual(sold["realization_due_cents"], 264_000)
+            self.assertEqual(sold["surplus_return_cents"], 0)
+            self.assertEqual(sold["shortfall_cents"], 64_000)
+
+        csv_response = self.client.get("/accounting/export.csv")
+        self.assertEqual(csv_response.status_code, 200)
+        csv_data = csv_response.get_data(as_text=True)
+        self.assertIn("Niedobór po sprzedaży", csv_data)
+        self.assertIn("640,00 zł", csv_data)
 
 
 if __name__ == "__main__":

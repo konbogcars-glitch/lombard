@@ -62,6 +62,7 @@ CREATE TABLE IF NOT EXISTS contracts (
     sale_amount_cents INTEGER,
     realization_due_cents INTEGER,
     surplus_return_cents INTEGER,
+    shortfall_cents INTEGER,
     realization_note TEXT,
     accounted_at TEXT,
     accountant_sent_at TEXT,
@@ -98,6 +99,7 @@ CONTRACT_COLUMN_MIGRATIONS = {
     "sale_amount_cents": "INTEGER",
     "realization_due_cents": "INTEGER",
     "surplus_return_cents": "INTEGER",
+    "shortfall_cents": "INTEGER",
     "realization_note": "TEXT",
 }
 
