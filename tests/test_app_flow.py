@@ -1,3 +1,4 @@
+import io
 import tempfile
 import unittest
 from pathlib import Path
@@ -22,6 +23,73 @@ class AppFlowTest(unittest.TestCase):
 
     def tearDown(self):
         self.tempdir.cleanup()
+
+    def _branch_id(self, code):
+        with self.app.app_context():
+            return get_db().execute(
+                "SELECT id FROM branches WHERE code = ?",
+                (code,),
+            ).fetchone()["id"]
+
+    def _create_client(self, *, first_name="Jan", last_name="Kowalski", pesel="90010112345"):
+        response = self.client.post(
+            "/clients",
+            data={
+                "first_name": first_name,
+                "last_name": last_name,
+                "pesel": pesel,
+                "document_type": "Dowód Osobisty",
+                "document_number": f"{pesel[-3:]}ABC",
+                "phone": "500600700",
+                "email": f"{first_name.lower()}@example.com",
+                "street_address": "ul. Testowa 1",
+                "postal_code": "28-100",
+                "city": "Busko-Zdrój",
+                "notes": "",
+            },
+            follow_redirects=True,
+        )
+        self.assertEqual(response.status_code, 200)
+        with self.app.app_context():
+            return get_db().execute(
+                "SELECT id FROM clients WHERE pesel = ? ORDER BY id DESC LIMIT 1",
+                (pesel,),
+            ).fetchone()["id"]
+
+    def _create_contract(
+        self,
+        *,
+        branch_code="BUS",
+        client_id=None,
+        issue_date="2026-01-01",
+        term_days="7",
+        loan_amount="2000,00",
+        commission_amount="200,00",
+    ):
+        if client_id is None:
+            client_id = self._create_client()
+        response = self.client.post(
+            "/contracts/new",
+            data={
+                "branch_id": self._branch_id(branch_code),
+                "client_id": client_id,
+                "issue_date": issue_date,
+                "loan_amount": loan_amount,
+                "commission_amount": commission_amount,
+                "commission_rate": "10",
+                "term_days": term_days,
+                "collateral_type": "rzecz ruchoma",
+                "collateral_description": "Telefon testowy IMEI 123",
+                "collateral_value": "3000,00",
+                "valuation_basis": "oględziny i oferty internetowe",
+            },
+            follow_redirects=False,
+        )
+        self.assertEqual(response.status_code, 302)
+        with self.app.app_context():
+            return get_db().execute(
+                "SELECT * FROM contracts ORDER BY id DESC LIMIT 1",
+            ).fetchone()
 
     def test_client_contract_pdf_settlement_and_accounting_export(self):
         response = self.client.post(
@@ -88,6 +156,133 @@ class AppFlowTest(unittest.TestCase):
         self.assertEqual(csv_response.status_code, 200)
         self.assertIn("BUS/2026/0001", csv_response.get_data(as_text=True))
         self.assertIn("2 222,00 zł", csv_response.get_data(as_text=True))
+
+    def test_contract_photo_upload_is_stored_and_served(self):
+        contract = self._create_contract()
+
+        response = self.client.post(
+            f"/contracts/{contract['id']}/photos",
+            data={
+                "caption": "Stan przedmiotu przy przyjęciu",
+                "photos": [(io.BytesIO(b"fake image bytes"), "zastaw.jpg")],
+            },
+            content_type="multipart/form-data",
+            follow_redirects=True,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        with self.app.app_context():
+            photo = get_db().execute(
+                "SELECT * FROM contract_photos WHERE contract_id = ?",
+                (contract["id"],),
+            ).fetchone()
+            self.assertIsNotNone(photo)
+            self.assertEqual(photo["caption"], "Stan przedmiotu przy przyjęciu")
+
+        file_response = self.client.get(
+            f"/uploads/{contract['id']}/{photo['stored_filename']}"
+        )
+        self.assertEqual(file_response.status_code, 200)
+        self.assertEqual(file_response.get_data(), b"fake image bytes")
+
+    def test_overdue_status_and_accounting_transitions_are_guarded(self):
+        contract = self._create_contract(issue_date="2025-01-01", term_days="1")
+
+        response = self.client.get(f"/contracts/{contract['id']}")
+        self.assertEqual(response.status_code, 200)
+        with self.app.app_context():
+            refreshed = get_db().execute(
+                "SELECT status FROM contracts WHERE id = ?",
+                (contract["id"],),
+            ).fetchone()
+            self.assertEqual(refreshed["status"], "expired")
+
+        account_active_response = self.client.post(
+            f"/contracts/{contract['id']}/account",
+            follow_redirects=True,
+        )
+        self.assertEqual(account_active_response.status_code, 200)
+        with self.app.app_context():
+            still_expired = get_db().execute(
+                "SELECT status FROM contracts WHERE id = ?",
+                (contract["id"],),
+            ).fetchone()
+            self.assertEqual(still_expired["status"], "expired")
+
+        settle_response = self.client.post(
+            f"/contracts/{contract['id']}/settle",
+            data={"payment_date": "2025-01-02", "paid_amount": ""},
+            follow_redirects=True,
+        )
+        self.assertEqual(settle_response.status_code, 200)
+        with self.app.app_context():
+            settled = get_db().execute(
+                "SELECT status, paid_amount_cents FROM contracts WHERE id = ?",
+                (contract["id"],),
+            ).fetchone()
+            self.assertEqual(settled["status"], "settled")
+            original_paid_amount = settled["paid_amount_cents"]
+
+        account_response = self.client.post(
+            f"/contracts/{contract['id']}/account",
+            data={"accounting_note": "wysłano zbiorczo"},
+            follow_redirects=True,
+        )
+        self.assertEqual(account_response.status_code, 200)
+
+        resettle_response = self.client.post(
+            f"/contracts/{contract['id']}/settle",
+            data={"payment_date": "2025-01-03", "paid_amount": "9999,99"},
+            follow_redirects=True,
+        )
+        self.assertEqual(resettle_response.status_code, 200)
+        with self.app.app_context():
+            accounted = get_db().execute(
+                """
+                SELECT status, paid_amount_cents, accounting_note
+                FROM contracts
+                WHERE id = ?
+                """,
+                (contract["id"],),
+            ).fetchone()
+            self.assertEqual(accounted["status"], "accounted")
+            self.assertEqual(accounted["paid_amount_cents"], original_paid_amount)
+            self.assertEqual(accounted["accounting_note"], "wysłano zbiorczo")
+
+    def test_accounting_can_be_filtered_by_branch(self):
+        bus_client = self._create_client(first_name="Anna", pesel="80010112345")
+        chm_client = self._create_client(first_name="Ewa", pesel="81010112345")
+        bus_contract = self._create_contract(
+            branch_code="BUS",
+            client_id=bus_client,
+            issue_date="2026-02-01",
+        )
+        chm_contract = self._create_contract(
+            branch_code="CHM",
+            client_id=chm_client,
+            issue_date="2026-02-01",
+        )
+
+        for contract in (bus_contract, chm_contract):
+            response = self.client.post(
+                f"/contracts/{contract['id']}/settle",
+                data={"payment_date": "2026-02-07", "paid_amount": ""},
+                follow_redirects=True,
+            )
+            self.assertEqual(response.status_code, 200)
+
+        branch_id = self._branch_id("BUS")
+        page_response = self.client.get(f"/accounting?branch_id={branch_id}")
+        self.assertEqual(page_response.status_code, 200)
+        page = page_response.get_data(as_text=True)
+        self.assertIn(bus_contract["contract_number"], page)
+        self.assertNotIn(chm_contract["contract_number"], page)
+
+        csv_response = self.client.get(f"/accounting/export.csv?branch_id={branch_id}")
+        self.assertEqual(csv_response.status_code, 200)
+        csv_data = csv_response.get_data(as_text=True)
+        self.assertIn(bus_contract["contract_number"], csv_data)
+        self.assertNotIn(chm_contract["contract_number"], csv_data)
 
 
 if __name__ == "__main__":

@@ -8,10 +8,20 @@
       <p class="muted">Po spłacie umowy oznacz ją jako wysłaną do księgowej.</p>
     </div>
     <div class="actions">
-      <a class="button primary" href="{{ url_for('lombard.accounting_export') }}">Eksport CSV do wysłania</a>
-      <a class="button" href="{{ url_for('lombard.accounting_export', include_sent=1) }}">Eksport CSV wszystko</a>
+      <a class="button primary" href="{{ url_for('lombard.accounting_export', branch_id=selected_branch_id) if selected_branch_id else url_for('lombard.accounting_export') }}">Eksport CSV do wysłania</a>
+      <a class="button" href="{{ url_for('lombard.accounting_export', include_sent=1, branch_id=selected_branch_id) if selected_branch_id else url_for('lombard.accounting_export', include_sent=1) }}">Eksport CSV wszystko</a>
     </div>
   </div>
+
+  <form method="get" class="filters">
+    <select name="branch_id">
+      <option value="">Wszystkie punkty</option>
+      {% for branch in branches %}
+        <option value="{{ branch.id }}" {% if selected_branch_id == branch.id %}selected{% endif %}>{{ branch.city }}</option>
+      {% endfor %}
+    </select>
+    <button class="button">Filtruj</button>
+  </form>
 
   {% if contracts %}
     <table>

@@ -84,8 +84,24 @@ def _photo_rows(contract_id: int) -> list[dict]:
     )
 
 
+def _refresh_overdue_contracts(today: date | None = None) -> None:
+    current_date = today or _today()
+    db = get_db()
+    db.execute(
+        """
+        UPDATE contracts
+        SET status = 'expired',
+            updated_at = CURRENT_TIMESTAMP
+        WHERE status = 'active' AND due_date < ?
+        """,
+        (current_date.isoformat(),),
+    )
+    db.commit()
+
+
 @bp.route("/")
 def dashboard() -> str:
+    _refresh_overdue_contracts()
     stats = query_one(
         """
         SELECT
@@ -254,6 +270,7 @@ def contract_new() -> str | Response:
 
 @bp.route("/contracts/<int:contract_id>")
 def contract_detail(contract_id: int) -> str:
+    _refresh_overdue_contracts()
     contract = _contract_or_404(contract_id)
     photos = _photo_rows(contract_id)
     expected_payment = repayment_amount_on(
@@ -313,7 +330,12 @@ def uploaded_photo(contract_id: int, filename: str) -> Response:
 
 @bp.route("/contracts/<int:contract_id>/settle", methods=["POST"])
 def contract_settle(contract_id: int) -> Response:
+    _refresh_overdue_contracts()
     contract = _contract_or_404(contract_id)
+    if contract["status"] not in {"active", "expired"}:
+        flash("Tę umowę już rozliczono albo przekazano do księgowości.", "warning")
+        return redirect(url_for("lombard.contract_detail", contract_id=contract_id))
+
     payment_date = _parse_date(request.form["payment_date"])
     paid_amount_raw = request.form.get("paid_amount", "").strip()
     paid_amount = (
@@ -343,7 +365,14 @@ def contract_settle(contract_id: int) -> Response:
 
 @bp.route("/contracts/<int:contract_id>/account", methods=["POST"])
 def contract_account(contract_id: int) -> Response:
-    _contract_or_404(contract_id)
+    contract = _contract_or_404(contract_id)
+    if contract["status"] == "accounted":
+        flash("Ta umowa jest już oznaczona jako wysłana do księgowej.", "warning")
+        return redirect(url_for("lombard.accounting"))
+    if contract["status"] != "settled":
+        flash("Do księgowości można przekazać tylko spłaconą umowę.", "warning")
+        return redirect(url_for("lombard.contract_detail", contract_id=contract_id))
+
     now = datetime.now().isoformat(timespec="seconds")
     get_db().execute(
         """
@@ -373,6 +402,7 @@ def contract_pdf(contract_id: int) -> Response:
 
 @bp.route("/archive")
 def archive() -> str:
+    _refresh_overdue_contracts()
     status = request.args.get("status", "")
     branch_id = request.args.get("branch_id", type=int)
     q = request.args.get("q", "").strip()
@@ -414,23 +444,46 @@ def archive() -> str:
 
 @bp.route("/accounting")
 def accounting() -> str:
+    branch_id = request.args.get("branch_id", type=int)
+    params: list[int] = []
+    branch_clause = ""
+    if branch_id:
+        branch_clause = "AND contracts.branch_id = ?"
+        params.append(branch_id)
+
     contracts = query_all(
-        """
+        f"""
         SELECT contracts.*, clients.first_name, clients.last_name, branches.city AS branch_city
         FROM contracts
         JOIN clients ON clients.id = contracts.client_id
         JOIN branches ON branches.id = contracts.branch_id
         WHERE contracts.status IN ('settled', 'accounted')
+        {branch_clause}
         ORDER BY contracts.payment_date DESC, contracts.id DESC
-        """
+        """,
+        tuple(params),
     )
-    return render_template("accounting.html", contracts=contracts)
+    branches = query_all("SELECT * FROM branches ORDER BY id")
+    return render_template(
+        "accounting.html",
+        contracts=contracts,
+        branches=branches,
+        selected_branch_id=branch_id,
+    )
 
 
 @bp.route("/accounting/export.csv")
 def accounting_export() -> Response:
     include_sent = request.args.get("include_sent") == "1"
-    where = "contracts.status IN ('settled', 'accounted')" if include_sent else "contracts.status = 'settled'"
+    branch_id = request.args.get("branch_id", type=int)
+    clauses = [
+        "contracts.status IN ('settled', 'accounted')" if include_sent else "contracts.status = 'settled'"
+    ]
+    params: list[int] = []
+    if branch_id:
+        clauses.append("contracts.branch_id = ?")
+        params.append(branch_id)
+    where = " AND ".join(clauses)
     rows = query_all(
         f"""
         SELECT contracts.*, clients.first_name, clients.last_name, clients.pesel, branches.city AS branch_city
@@ -439,7 +492,8 @@ def accounting_export() -> Response:
         JOIN branches ON branches.id = contracts.branch_id
         WHERE {where}
         ORDER BY contracts.payment_date DESC, contracts.id DESC
-        """
+        """,
+        tuple(params),
     )
     output = io.StringIO()
     writer = csv.writer(output, delimiter=";")
