@@ -7,7 +7,8 @@ Pierwsza wersja aplikacji webowej do obsługi lombardu:
 - archiwum umów z filtrami,
 - dodawanie zdjęć przedmiotu zabezpieczenia,
 - generowanie PDF umowy na podstawie dostarczonego wzoru,
-- rozliczenie spłaty i ewidencja CSV dla księgowej.
+- rozliczenie spłaty i ewidencja CSV dla księgowej z filtrem punktu,
+- automatyczne oznaczanie umów po terminie oraz blokady ponownego księgowania.
 
 ## Uruchomienie
 
@@ -32,7 +33,7 @@ Katalog `instance/` nie powinien być commitowany do repozytorium.
 ## Testy
 
 ```bash
-python -m unittest
+python3 -m unittest discover -s tests
 ```
 
 ## Zakres MVP
