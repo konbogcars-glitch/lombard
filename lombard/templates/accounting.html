@@ -1,0 +1,86 @@
+{% extends "base.html" %}
+{% block title %}Ewidencja dla księgowej{% endblock %}
+{% block content %}
+<section class="panel">
+  <div class="panel-heading">
+    <div>
+      <h1>Ewidencja dla księgowej</h1>
+      <p class="muted">Po spłacie albo sprzedaży zabezpieczenia wyeksportuj CSV i oznacz wysłane pozycje jako zaksięgowane.</p>
+    </div>
+    <div class="actions">
+      {% set branch_export = selected_branch_id if selected_branch_id else ('all' if showing_all_branches else none) %}
+      <a class="button primary" href="{{ url_for('lombard.accounting_export', branch_id=branch_export) if branch_export else url_for('lombard.accounting_export') }}">Eksport CSV do wysłania</a>
+      <a class="button" href="{{ url_for('lombard.accounting_package', branch_id=branch_export) if branch_export else url_for('lombard.accounting_package') }}">Paczka ZIP dla księgowej</a>
+      <a class="button" href="{{ url_for('lombard.accounting_export', include_sent=1, branch_id=branch_export) if branch_export else url_for('lombard.accounting_export', include_sent=1) }}">Eksport CSV wszystko</a>
+    </div>
+  </div>
+
+  <form method="get" class="filters">
+    <select name="branch_id">
+      <option value="all" {% if not selected_branch_id %}selected{% endif %}>Wszystkie punkty</option>
+      {% for branch in branches %}
+        <option value="{{ branch.id }}" {% if selected_branch_id == branch.id %}selected{% endif %}>{{ branch.city }}</option>
+      {% endfor %}
+    </select>
+    <button class="button">Filtruj</button>
+  </form>
+
+  {% if contracts %}
+    <form method="post" action="{{ url_for('lombard.accounting_bulk_account') }}" class="bulk-accounting">
+      {% if selected_branch_id %}
+        <input type="hidden" name="branch_id" value="{{ selected_branch_id }}">
+      {% endif %}
+      <label>Notatka zbiorcza
+        <input name="accounting_note" placeholder="np. CSV wysłany mailem do księgowej">
+      </label>
+      <button class="button">Oznacz pozycje z tego filtra jako wysłane</button>
+    </form>
+
+    <table>
+      <thead>
+        <tr>
+          <th>Nr</th>
+          <th>Klient</th>
+          <th>Punkt</th>
+          <th>Realizacja</th>
+          <th>Kwota</th>
+          <th>Zwrot</th>
+          <th>Status</th>
+          <th>Księgowa</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for contract in contracts %}
+          <tr>
+            <td>{{ contract.contract_number }}</td>
+            <td>{{ contract.first_name }} {{ contract.last_name }}</td>
+            <td>{{ contract.branch_city }}</td>
+            <td>
+              {% if contract.realization_date %}
+                sprzedaż · {{ contract.realization_date|date_pl }}
+              {% else %}
+                spłata · {{ contract.payment_date|date_pl }}
+              {% endif %}
+            </td>
+            <td>{{ (contract.sale_amount_cents if contract.realization_date else contract.paid_amount_cents)|money }}</td>
+            <td>{{ contract.surplus_return_cents|money if contract.realization_date else "-" }}</td>
+            <td><span class="status">{{ contract.status|status_label }}</span></td>
+            <td>{{ contract.accountant_sent_at or "do wysłania" }}</td>
+            <td>
+              <a href="{{ url_for('lombard.contract_detail', contract_id=contract.id) }}">Otwórz</a>
+              {% if contract.status in ["settled", "sold"] %}
+                <form method="post" action="{{ url_for('lombard.contract_account', contract_id=contract.id) }}" class="table-form">
+                  <button class="link-button">Oznacz wysłaną</button>
+                </form>
+              {% endif %}
+            </td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  {% else %}
+    <p class="empty">Brak spłaconych lub zrealizowanych umów do księgowania.</p>
+  {% endif %}
+</section>
+{% endblock %}
